@@ -1,0 +1,9 @@
+# Runtime data
+pe_history.db
+pe_history.db-journal
+pe_history.db-wal
+pe_history.db-shm
+pe_history/
+
+# Local config overrides
+config.local.toml
