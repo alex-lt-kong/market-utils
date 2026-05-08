@@ -35,7 +35,7 @@ button:disabled{background:#adb5bd;cursor:wait}
 
 .dashboard{display:grid;gap:2rem;margin:1.25rem 0;grid-template-columns:1fr}
 @media (min-width:1280px){
-  .dashboard{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:start}
+  .dashboard{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
 }
 section.summary h2,section.charts h2{
   font-size:.78rem;color:var(--muted);margin:0 0 .5rem;
@@ -114,13 +114,13 @@ const COLUMN_DEFS = [
   {field: "name", headerName: "Company", flex: 2, valueFormatter: p => p.value || "—"},
   {field: "price", headerName: "Price", type: "numericColumn", flex: 1.2,
     valueFormatter: p => fmtPrice(p.data.price, p.data.currency)},
-  {field: "trailing_eps", headerName: "Trailing EPS", type: "numericColumn", flex: 1,
+  {field: "trailing_eps", headerName: "TTM EPS", type: "numericColumn", flex: 1,
     valueFormatter: p => fmt(p.value)},
   {field: "ttm_pe", headerName: "TTM P/E", type: "numericColumn", flex: 1,
     valueFormatter: p => fmt(p.value)},
-  {field: "forward_eps", headerName: "Forward EPS", type: "numericColumn", flex: 1,
+  {field: "forward_eps", headerName: "Fwd EPS", type: "numericColumn", flex: 1,
     valueFormatter: p => fmt(p.value)},
-  {field: "forward_pe", headerName: "Forward P/E", type: "numericColumn", flex: 1,
+  {field: "forward_pe", headerName: "Fwd P/E", type: "numericColumn", flex: 1,
     valueFormatter: p => fmt(p.value), sort: "asc"},
 ];
 
