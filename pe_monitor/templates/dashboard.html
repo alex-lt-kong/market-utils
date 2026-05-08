@@ -16,7 +16,7 @@
 html{scroll-behavior:smooth}
 body{
   font-family:system-ui,-apple-system,sans-serif;
-  max-width:1800px;margin:0 auto;padding:0 1rem 3rem;
+  max-width:2200px;margin:0 auto;padding:0 1rem 3rem;
   background:var(--bg);color:var(--ink);
 }
 header{
@@ -35,7 +35,7 @@ button:disabled{background:#adb5bd;cursor:wait}
 
 .dashboard{display:grid;gap:2rem;margin:1.25rem 0;grid-template-columns:1fr}
 @media (min-width:1280px){
-  .dashboard{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);align-items:start}
+  .dashboard{grid-template-columns:minmax(0,1.5fr) minmax(0,1fr);align-items:start}
 }
 section.summary h2,section.charts h2{
   font-size:.78rem;color:var(--muted);margin:0 0 .5rem;
@@ -172,7 +172,7 @@ function ensureGrid() {
   if (gridApi) return;
   agGrid.ModuleRegistry.registerModules([agGrid.AllCommunityModule]);
   gridApi = agGrid.createGrid(document.getElementById("summary-grid"), {
-    theme: agGrid.themeQuartz,
+    theme: agGrid.themeQuartz.withParams({rowHeight: 32, headerHeight: 36}),
     columnDefs: COLUMN_DEFS,
     rowData: [],
     domLayout: "autoHeight",
