@@ -8,12 +8,23 @@ from apscheduler.schedulers.background import BackgroundScheduler
 import storage
 
 
+def _first(info: dict, *keys: str):
+    """Return the first key whose value is not None. Yahoo often mirrors the
+    same number under multiple keys (trailingEps / epsTrailingTwelveMonths,
+    forwardEps / epsForward), so fall through aliases."""
+    for k in keys:
+        v = info.get(k)
+        if v is not None:
+            return v
+    return None
+
+
 def fetch_pe(ticker: str) -> dict:
     info = yf.Ticker(ticker).info
 
-    price = info.get("currentPrice") or info.get("regularMarketPrice")
-    trailing_eps = info.get("trailingEps")
-    forward_eps = info.get("forwardEps")
+    price = _first(info, "currentPrice", "regularMarketPrice")
+    trailing_eps = _first(info, "trailingEps", "epsTrailingTwelveMonths")
+    forward_eps = _first(info, "forwardEps", "epsForward")
     ttm_pe = info.get("trailingPE")
     fwd_pe = info.get("forwardPE")
 

@@ -16,7 +16,7 @@
 html{scroll-behavior:smooth}
 body{
   font-family:system-ui,-apple-system,sans-serif;
-  max-width:1400px;margin:0 auto;padding:0 1rem 3rem;
+  max-width:1800px;margin:0 auto;padding:0 1rem 3rem;
   background:var(--bg);color:var(--ink);
 }
 header{
@@ -33,7 +33,10 @@ button{
 button:hover{background:#495057}
 button:disabled{background:#adb5bd;cursor:wait}
 
-section.summary{margin:1.25rem 0}
+.dashboard{display:grid;gap:2rem;margin:1.25rem 0;grid-template-columns:1fr}
+@media (min-width:1280px){
+  .dashboard{grid-template-columns:minmax(0,1.2fr) minmax(0,1fr);align-items:start}
+}
 section.summary h2,section.charts h2{
   font-size:.78rem;color:var(--muted);margin:0 0 .5rem;
   text-transform:uppercase;letter-spacing:.5px;font-weight:600;
@@ -43,7 +46,6 @@ section.summary h2,section.charts h2{
 #summary-grid .ag-row{cursor:pointer}
 #summary-grid .ticker-cell{font-weight:600;color:var(--accent);font-family:ui-monospace,Menlo,monospace}
 
-section.charts{margin-top:2rem}
 .chart-card{
   background:var(--surface);padding:1rem 1.25rem;margin:1rem 0;
   border-radius:var(--radius);box-shadow:var(--shadow);
@@ -74,6 +76,7 @@ canvas{width:100%!important;height:100%!important}
   <button id="refresh-btn" onclick="refresh()">Refresh now</button>
 </header>
 
+<main class="dashboard">
 <section class="summary">
   <h2>Snapshot</h2>
   <div id="summary-grid"></div>
@@ -90,6 +93,7 @@ canvas{width:100%!important;height:100%!important}
   </div>
   {% endfor %}
 </section>
+</main>
 
 <script>
 const tickers = {{ tickers | tojson }};
