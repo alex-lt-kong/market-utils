@@ -196,6 +196,13 @@ document.addEventListener("click", e => {
   }
 });
 
+const MAX_CHART_POINTS = 400;
+function thin(rows, maxPoints = MAX_CHART_POINTS) {
+  if (rows.length <= maxPoints) return rows;
+  const step = Math.ceil(rows.length / maxPoints);
+  return rows.filter((_, i) => i % step === 0 || i === rows.length - 1);
+}
+
 async function loadChart(ticker) {
   const res = await fetch(`/api/history/${ticker}`);
   const rows = await res.json();
@@ -211,15 +218,17 @@ async function loadChart(ticker) {
   latestEl.textContent =
     `${last.name || ""} · ${fmtPrice(last.price, last.currency)} · TTM ${fmt(last.ttm_pe)} · Fwd ${fmt(last.forward_pe)} · ${last.date}`;
 
+  const plot = thin(rows);
   container.innerHTML = `<canvas id="chart-${ticker}"></canvas>`;
   const ctx = document.getElementById(`chart-${ticker}`);
+  const lineStyle = {tension: 0.2, spanGaps: true, borderWidth: 1.5, pointRadius: 1.5, pointHoverRadius: 4};
   new Chart(ctx, {
     type: "line",
     data: {
-      labels: rows.map(r => r.date),
+      labels: plot.map(r => r.date),
       datasets: [
-        {label: "TTM P/E", data: rows.map(r => r.ttm_pe), borderColor: "#0d6efd", backgroundColor: "#0d6efd", tension: 0.2, spanGaps: true},
-        {label: "Forward P/E", data: rows.map(r => r.forward_pe), borderColor: "#dc3545", backgroundColor: "#dc3545", tension: 0.2, spanGaps: true},
+        {label: "TTM P/E", data: plot.map(r => r.ttm_pe), borderColor: "#0d6efd", backgroundColor: "#0d6efd", ...lineStyle},
+        {label: "Forward P/E", data: plot.map(r => r.forward_pe), borderColor: "#dc3545", backgroundColor: "#dc3545", ...lineStyle},
       ],
     },
     options: {
