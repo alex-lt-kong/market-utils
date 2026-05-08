@@ -16,7 +16,7 @@
 html{scroll-behavior:smooth}
 body{
   font-family:system-ui,-apple-system,sans-serif;
-  max-width:1080px;margin:0 auto;padding:0 1rem 3rem;
+  max-width:1400px;margin:0 auto;padding:0 1rem 3rem;
   background:var(--bg);color:var(--ink);
 }
 header{
@@ -107,14 +107,14 @@ const COLUMN_DEFS = [
   {field: "name", headerName: "Company", flex: 2, valueFormatter: p => p.value || "—"},
   {field: "price", headerName: "Price", type: "numericColumn", flex: 1.2,
     valueFormatter: p => fmtPrice(p.data.price, p.data.currency)},
-  {field: "ttm_pe", headerName: "TTM P/E", type: "numericColumn", flex: 1,
-    valueFormatter: p => fmt(p.value)},
-  {field: "forward_pe", headerName: "Forward P/E", type: "numericColumn", flex: 1,
-    valueFormatter: p => fmt(p.value), sort: "asc"},
   {field: "trailing_eps", headerName: "Trailing EPS", type: "numericColumn", flex: 1,
+    valueFormatter: p => fmt(p.value)},
+  {field: "ttm_pe", headerName: "TTM P/E", type: "numericColumn", flex: 1,
     valueFormatter: p => fmt(p.value)},
   {field: "forward_eps", headerName: "Forward EPS", type: "numericColumn", flex: 1,
     valueFormatter: p => fmt(p.value)},
+  {field: "forward_pe", headerName: "Forward P/E", type: "numericColumn", flex: 1,
+    valueFormatter: p => fmt(p.value), sort: "asc"},
 ];
 
 function ensureGrid() {
