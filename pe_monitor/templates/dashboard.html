@@ -4,6 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>P/E Monitor</title>
+<script src="{{ url_for('static', filename='ag-grid-community.min.js') }}"></script>
 <script src="{{ url_for('static', filename='chart.umd.js') }}"></script>
 <style>
 :root{
@@ -38,26 +39,9 @@ section.summary h2,section.charts h2{
   text-transform:uppercase;letter-spacing:.5px;font-weight:600;
 }
 
-table{
-  width:100%;border-collapse:collapse;background:var(--surface);
-  border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);
-}
-th{
-  background:var(--dark);color:#fff;padding:.55rem .75rem;text-align:left;
-  font-size:.78rem;font-weight:500;cursor:pointer;user-select:none;white-space:nowrap;
-  transition:background .15s;
-}
-th:hover{background:#495057}
-th .sort-ind{display:inline-block;width:1ch;color:#adb5bd;margin-left:.25rem}
-th.active .sort-ind{color:#fff}
-th.num{text-align:right}
-td{padding:.5rem .75rem;border-bottom:1px solid var(--border);font-size:.88rem}
-tr:last-child td{border-bottom:none}
-tr.row{cursor:pointer;transition:background .1s}
-tr.row:hover td{background:#eef4ff}
-td.num{text-align:right;font-variant-numeric:tabular-nums}
-td.ticker code{background:none;font-weight:600;color:var(--accent)}
-td.muted{color:#adb5bd;font-style:italic}
+#summary-grid{box-shadow:var(--shadow);border-radius:var(--radius);overflow:hidden}
+#summary-grid .ag-row{cursor:pointer}
+#summary-grid .ticker-cell{font-weight:600;color:var(--accent);font-family:ui-monospace,Menlo,monospace}
 
 section.charts{margin-top:2rem}
 .chart-card{
@@ -92,18 +76,7 @@ canvas{width:100%!important;height:100%!important}
 
 <section class="summary">
   <h2>Snapshot</h2>
-  <table id="summary-table">
-    <thead>
-      <tr>
-        <th data-key="ticker">Ticker<span class="sort-ind"></span></th>
-        <th data-key="name">Company<span class="sort-ind"></span></th>
-        <th data-key="price" class="num">Price<span class="sort-ind"></span></th>
-        <th data-key="ttm_pe" class="num">TTM P/E<span class="sort-ind"></span></th>
-        <th data-key="forward_pe" class="num active">Forward P/E<span class="sort-ind">▲</span></th>
-      </tr>
-    </thead>
-    <tbody id="summary-body"></tbody>
-  </table>
+  <div id="summary-grid"></div>
 </section>
 
 <section class="charts">
@@ -127,74 +100,52 @@ const fmtPrice = (price, currency) => {
   return `${sym}${Number(price).toFixed(2)}`;
 };
 
-let snapshotData = [];
-let sortKey = "forward_pe";
-let sortDir = 1;
+let gridApi;
 
-async function loadSnapshot() {
-  const res = await fetch("/api/latest");
-  snapshotData = await res.json();
-  renderTable();
-  const dates = snapshotData.map(r => r.date).filter(Boolean).sort();
-  const latest = dates[dates.length - 1] || "no data yet";
-  document.getElementById("meta").textContent = `· ${tickers.length} tickers · last updated ${latest}`;
-}
+const COLUMN_DEFS = [
+  {field: "ticker", headerName: "Ticker", width: 100, pinned: "left", cellClass: "ticker-cell"},
+  {field: "name", headerName: "Company", flex: 2, valueFormatter: p => p.value || "—"},
+  {field: "price", headerName: "Price", type: "numericColumn", flex: 1.2,
+    valueFormatter: p => fmtPrice(p.data.price, p.data.currency)},
+  {field: "ttm_pe", headerName: "TTM P/E", type: "numericColumn", flex: 1,
+    valueFormatter: p => fmt(p.value)},
+  {field: "forward_pe", headerName: "Forward P/E", type: "numericColumn", flex: 1,
+    valueFormatter: p => fmt(p.value), sort: "asc"},
+  {field: "trailing_eps", headerName: "Trailing EPS", type: "numericColumn", flex: 1,
+    valueFormatter: p => fmt(p.value)},
+  {field: "forward_eps", headerName: "Forward EPS", type: "numericColumn", flex: 1,
+    valueFormatter: p => fmt(p.value)},
+];
 
-function renderTable() {
-  const tbody = document.getElementById("summary-body");
-  const rows = [...snapshotData].sort((a, b) => {
-    const av = a[sortKey], bv = b[sortKey];
-    if (av == null && bv == null) return 0;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    if (typeof av === "string") return sortDir * av.localeCompare(bv);
-    return sortDir * (av - bv);
-  });
-  tbody.innerHTML = rows.map(r => `
-    <tr class="row" data-ticker="${r.ticker}">
-      <td class="ticker"><code>${r.ticker}</code></td>
-      <td>${r.name ? escapeHtml(r.name) : '<span class="muted">—</span>'}</td>
-      <td class="num">${fmtPrice(r.price, r.currency)}</td>
-      <td class="num">${fmt(r.ttm_pe)}</td>
-      <td class="num">${fmt(r.forward_pe)}</td>
-    </tr>
-  `).join("");
-  document.querySelectorAll("th[data-key]").forEach(th => {
-    th.classList.remove("active");
-    th.querySelector(".sort-ind").textContent = "";
-  });
-  const activeTh = document.querySelector(`th[data-key="${sortKey}"]`);
-  if (activeTh) {
-    activeTh.classList.add("active");
-    activeTh.querySelector(".sort-ind").textContent = sortDir === 1 ? "▲" : "▼";
-  }
-}
-
-function escapeHtml(s) {
-  return String(s).replace(/[&<>"']/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
-}
-
-document.addEventListener("click", e => {
-  const th = e.target.closest("th[data-key]");
-  if (th) {
-    const key = th.dataset.key;
-    if (sortKey === key) sortDir = -sortDir;
-    else { sortKey = key; sortDir = 1; }
-    renderTable();
-    return;
-  }
-  const row = e.target.closest("tr.row");
-  if (row) {
-    const t = row.dataset.ticker;
-    const target = document.getElementById(`chart-card-${t}`);
-    if (target) {
+function ensureGrid() {
+  if (gridApi) return;
+  agGrid.ModuleRegistry.registerModules([agGrid.AllCommunityModule]);
+  gridApi = agGrid.createGrid(document.getElementById("summary-grid"), {
+    theme: agGrid.themeQuartz,
+    columnDefs: COLUMN_DEFS,
+    rowData: [],
+    domLayout: "autoHeight",
+    defaultColDef: {resizable: true, sortable: true, filter: true},
+    onRowClicked: ({data}) => {
+      const target = document.getElementById(`chart-card-${data.ticker}`);
+      if (!target) return;
       target.scrollIntoView({behavior: "smooth", block: "start"});
       target.classList.remove("flash");
       void target.offsetWidth;
       target.classList.add("flash");
-    }
-  }
-});
+    },
+  });
+}
+
+async function loadSnapshot() {
+  const res = await fetch("/api/latest");
+  const data = await res.json();
+  ensureGrid();
+  gridApi.setGridOption("rowData", data);
+  const dates = data.map(r => r.date).filter(Boolean).sort();
+  const latest = dates[dates.length - 1] || "no data yet";
+  document.getElementById("meta").textContent = `· ${tickers.length} tickers · last updated ${latest}`;
+}
 
 const MAX_CHART_POINTS = 400;
 function thin(rows, maxPoints = MAX_CHART_POINTS) {
