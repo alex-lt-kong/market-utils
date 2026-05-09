@@ -101,6 +101,7 @@ canvas{width:100%!important;height:100%!important}
 const tickers = {{ tickers | tojson }};
 const CURRENCY_SYMBOLS = {USD:"$",HKD:"HK$",EUR:"€",GBP:"£",CNY:"¥",JPY:"¥",TWD:"NT$",KRW:"₩"};
 const fmt = v => (v == null ? "N/A" : Number(v).toFixed(2));
+const fmtInt = v => (v == null ? "N/A" : String(Math.round(Number(v))));
 const fmtPrice = (price, currency) => {
   if (price == null) return "N/A";
   const sym = CURRENCY_SYMBOLS[currency] || (currency ? currency + " " : "$");
@@ -140,6 +141,8 @@ const COLUMN_DEFS = [
     cellRenderer: p => linkCell(fmt(p.value), Y.stats(p.data.ticker))},
   {field: "forward_eps", headerName: "Fwd EPS", type: "numericColumn", flex: 1,
     cellRenderer: p => linkCell(fmt(p.value), Y.analysis(p.data.ticker))},
+  {field: "analyst_count", headerName: "Anlst", type: "numericColumn", flex: 0.7,
+    cellRenderer: p => linkCell(fmtInt(p.value), Y.analysis(p.data.ticker))},
   {field: "forward_pe", headerName: "Fwd P/E", type: "numericColumn", flex: 1,
     cellRenderer: p => linkCell(fmt(p.value), Y.analysis(p.data.ticker)), sort: "asc"},
 ];

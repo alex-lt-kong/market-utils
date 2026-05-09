@@ -27,6 +27,7 @@ def fetch_pe(ticker: str) -> dict:
     forward_eps = _first(info, "forwardEps", "epsForward")
     ttm_pe = info.get("trailingPE")
     fwd_pe = info.get("forwardPE")
+    analyst_count = info.get("numberOfAnalystOpinions")
 
     if ttm_pe is None and price and trailing_eps and trailing_eps > 0:
         ttm_pe = price / trailing_eps
@@ -42,6 +43,7 @@ def fetch_pe(ticker: str) -> dict:
         "forward_eps": forward_eps,
         "ttm_pe": ttm_pe,
         "forward_pe": fwd_pe,
+        "analyst_count": analyst_count,
     }
 
 

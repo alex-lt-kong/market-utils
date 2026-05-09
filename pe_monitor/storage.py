@@ -15,6 +15,7 @@ CREATE TABLE IF NOT EXISTS history (
     forward_eps   REAL,
     ttm_pe        REAL,
     forward_pe    REAL,
+    analyst_count INTEGER,
     PRIMARY KEY (ticker, date)
 );
 """
@@ -22,14 +23,19 @@ CREATE TABLE IF NOT EXISTS history (
 ROW_COLS = (
     "date", "name", "currency", "price",
     "trailing_eps", "forward_eps", "ttm_pe", "forward_pe",
+    "analyst_count",
 )
 
 
 def init_db(db_path: str) -> None:
-    """Create the database file and schema if they don't exist. Idempotent."""
+    """Create the database file and schema if they don't exist. Idempotent.
+    Also runs additive migrations for columns added after initial release."""
     Path(db_path).parent.mkdir(parents=True, exist_ok=True)
     with sqlite3.connect(db_path) as conn:
         conn.executescript(SCHEMA)
+        existing = {r[1] for r in conn.execute("PRAGMA table_info(history)")}
+        if "analyst_count" not in existing:
+            conn.execute("ALTER TABLE history ADD COLUMN analyst_count INTEGER")
 
 
 def read_history(db_path: str, ticker: str) -> list[dict]:
@@ -63,31 +69,22 @@ def latest_per_ticker(db_path: str, tickers: list[str]) -> list[dict]:
             result.append({
                 "ticker": t, "date": None, "name": "", "currency": None,
                 "price": None, "trailing_eps": None, "forward_eps": None,
-                "ttm_pe": None, "forward_pe": None,
+                "ttm_pe": None, "forward_pe": None, "analyst_count": None,
             })
     return result
 
 
 def append_snapshot(db_path: str, ticker: str, snapshot: dict) -> None:
     """UPSERT: same-day entries are replaced (latest write wins)."""
+    placeholders = ", ".join(["?"] * (1 + len(ROW_COLS)))
+    update_clause = ", ".join(f"{c}=excluded.{c}" for c in ROW_COLS if c != "date")
     with sqlite3.connect(db_path) as conn:
         conn.execute(f"""
             INSERT INTO history (ticker, {', '.join(ROW_COLS)})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(ticker, date) DO UPDATE SET
-                name=excluded.name,
-                currency=excluded.currency,
-                price=excluded.price,
-                trailing_eps=excluded.trailing_eps,
-                forward_eps=excluded.forward_eps,
-                ttm_pe=excluded.ttm_pe,
-                forward_pe=excluded.forward_pe
-        """, (
-            ticker.upper(),
-            snapshot["date"], snapshot.get("name"), snapshot.get("currency"),
-            snapshot.get("price"), snapshot.get("trailing_eps"),
-            snapshot.get("forward_eps"), snapshot.get("ttm_pe"),
-            snapshot.get("forward_pe"),
+            VALUES ({placeholders})
+            ON CONFLICT(ticker, date) DO UPDATE SET {update_clause}
+        """, (ticker.upper(), snapshot["date"]) + tuple(
+            snapshot.get(c) for c in ROW_COLS if c != "date"
         ))
 
 
@@ -108,13 +105,11 @@ def merge_history(db_path: str, ticker: str, new_rows: list[dict]) -> int:
         additions = [r for r in new_rows if r["date"] not in existing]
         if not additions:
             return 0
+        placeholders = ", ".join(["?"] * (1 + len(ROW_COLS)))
         conn.executemany(f"""
             INSERT INTO history (ticker, {', '.join(ROW_COLS)})
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            VALUES ({placeholders})
         """, [
-            (ticker, r["date"], r.get("name"), r.get("currency"),
-             r.get("price"), r.get("trailing_eps"), r.get("forward_eps"),
-             r.get("ttm_pe"), r.get("forward_pe"))
-            for r in additions
+            (ticker,) + tuple(r.get(c) for c in ROW_COLS) for r in additions
         ])
     return len(additions)
