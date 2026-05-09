@@ -35,7 +35,9 @@ button:disabled{background:#adb5bd;cursor:wait}
 
 .dashboard{display:grid;gap:2rem;margin:1.25rem 0;grid-template-columns:1fr}
 @media (min-width:1280px){
-  .dashboard{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start}
+  body{padding-bottom:0}
+  .dashboard{grid-template-columns:minmax(0,1fr) minmax(0,1fr);align-items:start;margin-bottom:0}
+  section.charts{max-height:calc(100vh - 6rem);overflow-y:auto}
 }
 section.summary h2,section.charts h2{
   font-size:.78rem;color:var(--muted);margin:0 0 .5rem;
