@@ -6,16 +6,18 @@ from pathlib import Path
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS history (
-    ticker        TEXT NOT NULL,
-    date          TEXT NOT NULL,
-    name          TEXT,
-    currency      TEXT,
-    price         REAL,
-    trailing_eps  REAL,
-    forward_eps   REAL,
-    ttm_pe        REAL,
-    forward_pe    REAL,
-    analyst_count INTEGER,
+    ticker             TEXT NOT NULL,
+    date               TEXT NOT NULL,
+    name               TEXT,
+    currency           TEXT,
+    price              REAL,
+    trailing_eps       REAL,
+    forward_eps        REAL,
+    ttm_pe             REAL,
+    forward_pe         REAL,
+    analyst_count      INTEGER,
+    financial_currency TEXT,
+    forward_eps_native REAL,
     PRIMARY KEY (ticker, date)
 );
 """
@@ -23,7 +25,13 @@ CREATE TABLE IF NOT EXISTS history (
 ROW_COLS = (
     "date", "name", "currency", "price",
     "trailing_eps", "forward_eps", "ttm_pe", "forward_pe",
-    "analyst_count",
+    "analyst_count", "financial_currency", "forward_eps_native",
+)
+
+_MIGRATIONS = (
+    ("analyst_count",      "ALTER TABLE history ADD COLUMN analyst_count INTEGER"),
+    ("financial_currency", "ALTER TABLE history ADD COLUMN financial_currency TEXT"),
+    ("forward_eps_native", "ALTER TABLE history ADD COLUMN forward_eps_native REAL"),
 )
 
 
@@ -34,8 +42,9 @@ def init_db(db_path: str) -> None:
     with sqlite3.connect(db_path) as conn:
         conn.executescript(SCHEMA)
         existing = {r[1] for r in conn.execute("PRAGMA table_info(history)")}
-        if "analyst_count" not in existing:
-            conn.execute("ALTER TABLE history ADD COLUMN analyst_count INTEGER")
+        for col, ddl in _MIGRATIONS:
+            if col not in existing:
+                conn.execute(ddl)
 
 
 def read_history(db_path: str, ticker: str) -> list[dict]:
@@ -70,6 +79,7 @@ def latest_per_ticker(db_path: str, tickers: list[str]) -> list[dict]:
                 "ticker": t, "date": None, "name": "", "currency": None,
                 "price": None, "trailing_eps": None, "forward_eps": None,
                 "ttm_pe": None, "forward_pe": None, "analyst_count": None,
+                "financial_currency": None, "forward_eps_native": None,
             })
     return result
 

@@ -16,7 +16,7 @@
 html{scroll-behavior:smooth}
 body{
   font-family:system-ui,-apple-system,sans-serif;
-  max-width:2200px;margin:0 auto;padding:0 1rem 3rem;
+  margin:0;padding:0 1rem 3rem;
   background:var(--bg);color:var(--ink);
 }
 header{
@@ -47,6 +47,7 @@ section.summary h2,section.charts h2{
 #summary-grid .ticker-cell{font-weight:600;color:var(--accent);font-family:ui-monospace,Menlo,monospace}
 #summary-grid .cell-link{color:inherit;text-decoration:none}
 #summary-grid .cell-link:hover{text-decoration:underline}
+#summary-grid .ccy-native{color:var(--muted);font-size:.85em;margin-left:.25em}
 
 .chart-card{
   background:var(--surface);padding:1rem 1.25rem;margin:1rem 0;
@@ -59,12 +60,6 @@ section.summary h2,section.charts h2{
 .empty{color:#adb5bd;font-size:.85rem;padding:2rem 0;text-align:center}
 .canvas-wrap{position:relative;height:280px}
 canvas{width:100%!important;height:100%!important}
-.back-to-top{
-  display:inline-block;margin-top:.5rem;font-size:.78rem;
-  color:var(--muted);text-decoration:none;
-}
-.back-to-top:hover{color:var(--accent)}
-
 @keyframes flash{
   0%{box-shadow:0 0 0 3px var(--accent),var(--shadow)}
   100%{box-shadow:0 0 0 0 transparent,var(--shadow)}
@@ -91,7 +86,6 @@ canvas{width:100%!important;height:100%!important}
   <div class="chart-card" id="chart-card-{{ t }}" style="display:none">
     <h3><code>{{ t }}</code><span class="latest" id="latest-{{ t }}"></span></h3>
     <div class="canvas-wrap" id="container-{{ t }}"><canvas id="chart-{{ t }}"></canvas></div>
-    <a href="#top" class="back-to-top">↑ Back to top</a>
   </div>
   {% endfor %}
 </section>
@@ -139,8 +133,18 @@ const COLUMN_DEFS = [
     cellRenderer: p => linkCell(fmt(p.value), Y.stats(p.data.ticker))},
   {field: "ttm_pe", headerName: "TTM P/E", type: "numericColumn", flex: 1,
     cellRenderer: p => linkCell(fmt(p.value), Y.stats(p.data.ticker))},
-  {field: "forward_eps", headerName: "Fwd EPS", type: "numericColumn", flex: 1,
-    cellRenderer: p => linkCell(fmt(p.value), Y.analysis(p.data.ticker))},
+  {field: "forward_eps", headerName: "Fwd EPS", type: "numericColumn", flex: 1.4,
+    cellRenderer: p => {
+      const main = fmt(p.value);
+      const native = p.data.forward_eps_native;
+      const fc = p.data.financial_currency, tc = p.data.currency;
+      if (main !== "N/A" && native != null && fc && fc !== tc) {
+        const sym = CURRENCY_SYMBOLS[fc] || (fc + " ");
+        return linkCell(`${main} <span class="ccy-native">(${sym}${Number(native).toFixed(2)})</span>`,
+                        Y.analysis(p.data.ticker));
+      }
+      return linkCell(main, Y.analysis(p.data.ticker));
+    }},
   {field: "analyst_count", headerName: "Anlst", type: "numericColumn", flex: 0.7,
     cellRenderer: p => linkCell(fmtInt(p.value), Y.analysis(p.data.ticker))},
   {field: "forward_pe", headerName: "Fwd P/E", type: "numericColumn", flex: 1,

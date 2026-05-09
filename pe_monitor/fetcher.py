@@ -20,7 +20,8 @@ def _first(info: dict, *keys: str):
 
 
 def fetch_pe(ticker: str) -> dict:
-    info = yf.Ticker(ticker).info
+    yt = yf.Ticker(ticker)
+    info = yt.info
 
     price = _first(info, "currentPrice", "regularMarketPrice")
     trailing_eps = _first(info, "trailingEps", "epsTrailingTwelveMonths")
@@ -28,6 +29,22 @@ def fetch_pe(ticker: str) -> dict:
     ttm_pe = info.get("trailingPE")
     fwd_pe = info.get("forwardPE")
     analyst_count = info.get("numberOfAnalystOpinions")
+    trade_ccy = info.get("currency")
+    financial_currency = info.get("financialCurrency")
+
+    # Native-currency forward EPS only matters when the company reports in a
+    # different currency than it trades in (HK-listed CN cos, ADRs). Skipping
+    # the second API call for US-only tickers keeps fetch latency down.
+    forward_eps_native = None
+    if financial_currency and trade_ccy and financial_currency != trade_ccy:
+        try:
+            df = yt.earnings_estimate
+            if df is not None and not df.empty and "+1y" in df.index:
+                v = df.loc["+1y", "avg"]
+                if v is not None and v == v:  # filter NaN
+                    forward_eps_native = float(v)
+        except Exception:
+            pass
 
     if ttm_pe is None and price and trailing_eps and trailing_eps > 0:
         ttm_pe = price / trailing_eps
@@ -37,13 +54,15 @@ def fetch_pe(ticker: str) -> dict:
     return {
         "date": date.today().isoformat(),
         "name": info.get("longName", ""),
-        "currency": info.get("currency"),
+        "currency": trade_ccy,
         "price": price,
         "trailing_eps": trailing_eps,
         "forward_eps": forward_eps,
         "ttm_pe": ttm_pe,
         "forward_pe": fwd_pe,
         "analyst_count": analyst_count,
+        "financial_currency": financial_currency,
+        "forward_eps_native": forward_eps_native,
     }
 
 
