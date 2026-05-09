@@ -42,9 +42,8 @@ section.summary h2,section.charts h2{
   text-transform:uppercase;letter-spacing:.5px;font-weight:600;
 }
 
-#summary-grid{box-shadow:var(--shadow);border-radius:var(--radius)}
+#summary-grid{box-shadow:var(--shadow);border-radius:var(--radius);overflow:hidden;height:calc(100vh - 8rem)}
 #summary-grid .ag-row{cursor:pointer}
-#summary-grid .ag-header{position:sticky;top:4rem;z-index:5}
 #summary-grid .ticker-cell{font-weight:600;color:var(--accent);font-family:ui-monospace,Menlo,monospace}
 #summary-grid .cell-link{color:inherit;text-decoration:none}
 #summary-grid .cell-link:hover{text-decoration:underline}
@@ -203,7 +202,7 @@ function ensureGrid() {
     theme: agGrid.themeQuartz.withParams({rowHeight: 32, headerHeight: 36}),
     columnDefs: COLUMN_DEFS,
     rowData: [],
-    domLayout: "autoHeight",
+    domLayout: "normal",
     defaultColDef: {resizable: true, sortable: true, filter: true},
     rowSelection: {
       mode: "multiRow",
