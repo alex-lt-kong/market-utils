@@ -1,0 +1,8 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-label="P/E Monitor">
+  <rect width="512" height="512" rx="96" fill="#0d6efd"/>
+  <g fill="#fff" font-family="system-ui, -apple-system, 'Helvetica Neue', Arial, sans-serif" font-weight="800" font-size="220" text-anchor="middle">
+    <text x="256" y="216">P</text>
+    <text x="256" y="444">E</text>
+  </g>
+  <rect x="96" y="248" width="320" height="16" rx="4" fill="#fff"/>
+</svg>
