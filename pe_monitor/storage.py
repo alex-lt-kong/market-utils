@@ -47,14 +47,26 @@ def init_db(db_path: str) -> None:
                 conn.execute(ddl)
 
 
-def read_history(db_path: str, ticker: str) -> list[dict]:
+def read_history(
+    db_path: str,
+    ticker: str,
+    start_date: str | None = None,
+    end_date: str | None = None,
+) -> list[dict]:
+    """Read history rows for a ticker, optionally bounded by [start_date,
+    end_date] (inclusive). Both bounds are ISO-format date strings."""
+    sql = f"SELECT {', '.join(ROW_COLS)} FROM history WHERE ticker = ?"
+    params: list = [ticker.upper()]
+    if start_date:
+        sql += " AND date >= ?"
+        params.append(start_date)
+    if end_date:
+        sql += " AND date <= ?"
+        params.append(end_date)
+    sql += " ORDER BY date"
     with sqlite3.connect(db_path) as conn:
         conn.row_factory = sqlite3.Row
-        rows = conn.execute(
-            f"SELECT {', '.join(ROW_COLS)} FROM history "
-            "WHERE ticker = ? ORDER BY date",
-            (ticker.upper(),),
-        ).fetchall()
+        rows = conn.execute(sql, params).fetchall()
     return [dict(r) for r in rows]
 
 
