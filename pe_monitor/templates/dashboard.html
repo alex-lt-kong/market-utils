@@ -127,6 +127,7 @@ canvas{width:100%!important;height:100%!important}
 
 <script>
 const tickers = {{ tickers | tojson }};
+const FIRST_LIVE_DATE = {{ first_live_collection_date | tojson }};
 const CURRENCY_SYMBOLS = {USD:"$",HKD:"HK$",EUR:"€",GBP:"£",CNY:"¥",JPY:"¥",TWD:"NT$",KRW:"₩"};
 const fmt = v => (v == null ? "N/A" : Number(v).toFixed(2));
 const fmtInt = v => (v == null ? "N/A" : String(Math.round(Number(v))));
@@ -144,7 +145,68 @@ const fmtVolume = v => {
   if (v >= 1e3)  return (v/1e3).toFixed(1)  + "K";
   return String(Math.round(v));
 };
-const Y_AXIS_WIDTH = 52;  // pin both charts so date axes line up
+// Compact form for axis ticks: "150M" / "1.5B" — no trailing zeros, fits a
+// narrow gutter. The verbose `fmtVolume` is still used in the header and
+// tooltip where precision is useful.
+const fmtVolumeAxis = v => {
+  if (v == null) return "";
+  v = Number(v);
+  if (v === 0) return "0";
+  const trim = n => (Number.isInteger(n) ? String(n) : n.toFixed(1).replace(/\.0$/, ""));
+  if (v >= 1e12) return trim(v/1e12) + "T";
+  if (v >= 1e9)  return trim(v/1e9)  + "B";
+  if (v >= 1e6)  return trim(v/1e6)  + "M";
+  if (v >= 1e3)  return trim(v/1e3)  + "K";
+  return String(Math.round(v));
+};
+const Y_AXIS_WIDTH = 58;  // pin both charts so date axes line up
+
+// Dashed vertical marker at `first_live_collection_date`. Anything left of
+// the line was backfilled (Wayback for fwd P/E, yfinance for everything
+// else); anything to the right is from live daily snapshots.
+//
+// The x-axis is categorical (one slot per data row), so we find the first
+// row >= cutoff and interpolate between it and the prior row by real-date
+// proportion. That way the line lands in the visually-correct gap even
+// when no row exactly matches the cutoff date.
+const cutoffLinePlugin = {
+  id: "cutoffLine",
+  afterDatasetsDraw(chart, _args, opts) {
+    const cutoff = opts.date;
+    if (!cutoff) return;
+    const labels = chart.data.labels;
+    if (!labels || !labels.length) return;
+    const idx = labels.findIndex(l => l >= cutoff);
+    if (idx === -1) return;  // cutoff is past the end — nothing to draw
+
+    const xScale = chart.scales.x;
+    let xPixel;
+    if (idx === 0) {
+      xPixel = xScale.getPixelForValue(labels[0]);
+    } else {
+      const prevTime = Date.parse(labels[idx - 1]);
+      const nextTime = Date.parse(labels[idx]);
+      const cutTime = Date.parse(cutoff);
+      const prevX = xScale.getPixelForValue(labels[idx - 1]);
+      const nextX = xScale.getPixelForValue(labels[idx]);
+      const t = (cutTime - prevTime) / (nextTime - prevTime);
+      xPixel = prevX + (nextX - prevX) * t;
+    }
+
+    const {top, bottom} = chart.chartArea;
+    const ctx = chart.ctx;
+    ctx.save();
+    ctx.strokeStyle = "rgba(108, 117, 125, 0.7)";
+    ctx.lineWidth = 1;
+    ctx.setLineDash([4, 3]);
+    ctx.beginPath();
+    ctx.moveTo(xPixel, top);
+    ctx.lineTo(xPixel, bottom);
+    ctx.stroke();
+    ctx.restore();
+  },
+};
+Chart.register(cutoffLinePlugin);
 
 let gridApi;
 const visibleCharts = new Set();
@@ -334,6 +396,7 @@ async function loadChart(ticker) {
         y: {beginAtZero: false, afterFit: pinWidth},
         x: {ticks: {display: false}, grid: {display: false}},
       },
+      plugins: {cutoffLine: {date: FIRST_LIVE_DATE}},
     },
   });
 
@@ -355,12 +418,13 @@ async function loadChart(ticker) {
       plugins: {
         legend: {display: false},
         tooltip: {callbacks: {label: c => `Volume: ${fmtVolume(c.parsed.y)}`}},
+        cutoffLine: {date: FIRST_LIVE_DATE},
       },
       scales: {
         y: {
           beginAtZero: true,
           afterFit: pinWidth,
-          ticks: {callback: fmtVolume, maxTicksLimit: 3},
+          ticks: {callback: fmtVolumeAxis, maxTicksLimit: 3},
         },
         x: {ticks: {maxRotation: 0, autoSkip: true, maxTicksLimit: 8}},
       },

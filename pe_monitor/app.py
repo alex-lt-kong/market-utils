@@ -67,7 +67,11 @@ def _collapse_bucket(bucket_rows: list[dict]) -> dict:
 
 @app.route("/")
 def dashboard():
-    return render_template("dashboard.html", tickers=CONFIG["tickers"])
+    return render_template(
+        "dashboard.html",
+        tickers=CONFIG["tickers"],
+        first_live_collection_date=CONFIG.get("first_live_collection_date"),
+    )
 
 
 @app.route("/api/tickers")

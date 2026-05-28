@@ -5,5 +5,9 @@ pe_history.db-wal
 pe_history.db-shm
 pe_history/
 
+# Wayback backfill artifacts (one-shot, not for version control)
+wayback_out/
+wayback*.log
+
 # Real config (copy from config.sample.toml)
 config.toml

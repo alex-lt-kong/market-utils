@@ -15,6 +15,14 @@ fetch_interval_seconds = 86400
 # Where snapshots are persisted (SQLite database file, relative to this file).
 database_path = "pe_history.db"
 
+# The first date on which live daily snapshots populated forward_pe. The
+# Wayback importer (import_wayback_fwdpe.py) refuses to write any date on
+# or after this — live values are authoritative, Wayback-scraped values
+# are not. The dashboard draws a dashed vertical marker at this date.
+# Set to the earliest date you ran the live crawler; e.g.:
+#   sqlite> SELECT MIN(date) FROM history WHERE forward_pe IS NOT NULL;
+first_live_collection_date = "2026-01-01"
+
 # Network binding:
 #   "127.0.0.1" - localhost only (recommended for personal use)
 #   "0.0.0.0"   - all interfaces; the dashboard has no auth, so only do this on a trusted LAN
