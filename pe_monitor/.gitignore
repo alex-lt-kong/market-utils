@@ -9,5 +9,8 @@ pe_history/
 wayback_out/
 wayback*.log
 
+# IBES dumps — multi-GB CSVs, not for version control (see [ibes] in config)
+ibes.*.csv
+
 # Real config (copy from config.sample.toml)
 config.toml

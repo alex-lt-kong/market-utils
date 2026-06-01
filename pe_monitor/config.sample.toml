@@ -28,3 +28,72 @@ first_live_collection_date = "2026-01-01"
 #   "0.0.0.0"   - all interfaces; the dashboard has no auth, so only do this on a trusted LAN
 host = "127.0.0.1"
 port = 5000
+
+# IBES historical-EPS backfill (used by import_ibes.py).
+# Two I/B/E/S dumps, joined on (TICKER, STATPERS):
+#   stat_csv — Summary Statistics: estimates, columns TICKER, STATPERS, FISCALP,
+#              FPI, MEANEST, CURCODE, FPEDATS ...
+#   act_csv  — Actuals + Price: columns TICKER, STATPERS, PRICE, PRDAYS,
+#              CURR_PRICE, FY0A, INT0A ... (the contemporaneous price per period)
+# Plus a mapping from each Yahoo ticker to its proprietary IBES TICKER code.
+# OFTIC has leading-zero quirks and is reused across markets, so we key on TICKER.
+# Discover candidates with:
+#   awk -F',' '$4 ~ /COMPANY NAME/ {print $1, $3, $4}' ibes.statsumu_epsus.csv | sort -u
+# This section is placed LAST because a TOML table captures every subsequent
+# top-level key until the next [header] — putting it earlier would pull
+# host/port into [ibes.ticker_map].
+[ibes]
+stat_csv = "ibes.statsumu_epsus.csv"   # IBES Summary Statistics (estimates: MEANEST per FPI)
+act_csv  = "ibes.actpsumu_epsus.csv"   # IBES Actuals + Price (PRICE/PRDAYS per STATPERS)
+
+[ibes.ticker_map]
+# Values are IBES proprietary TICKER codes (column TICKER in the dump), NOT
+# market tickers. Some are non-obvious — META is "FBK", Visa is "VISA",
+# Micron is "DRAM", BAC is "NCB", Berkshire B is "BKHT/1". Regenerate by
+# company-name search:
+#   awk -F',' '$4 ~ /COMPANY NAME/ {print $1, $3, $4}' ibes.csv | sort -u
+NVDA = "NVDA"
+MSFT = "MSFT"
+GOOG = "GOOG"
+META = "FBK"          # ex-Facebook
+AMZN = "AMZN"
+AVGO = "AOVG"         # Broadcom (ex-Avago Technologies)
+AMD = "AMD"
+MU = "DRAM"           # Micron
+INTC = "INTC"
+QCOM = "QCOM"
+MRVL = "MRVL"
+ARM = "04SO"
+ORCL = "ORCL"
+UNH = "UNIH"
+KO = "KO"
+MCD = "MCD"
+WMT = "WMT"
+KHC = "KHC"
+BAC = "NCB"           # Bank of America (legacy NationsBank code)
+"BRK-B" = "BKHT/1"    # Class B (Class A is "BKHT")
+V = "VISA"
+NYT = "NYT"
+# Chinese ADRs (US-listed; IBES reports per-ADR; CURCODE may be USD or CNY)
+PDD = "PDD"
+BABA = "BABA"
+BIDU = "BIDU"
+NIO = "029J"
+# Other ADRs / dual-listed
+TSM = "TSM2"          # US ADR (Taiwan listing is "@FCT" / 2330)
+ASML = "ASML"
+# Hong Kong locals (TICKER prefixed with "@" in IBES; price in HKD)
+"0700.HK" = "@ZGH"      # Tencent
+"1211.HK" = "@4B7"      # BYD H-share
+"0981.HK" = "@J6E"      # SMIC
+"9888.HK" = "@0VS1"     # Baidu HK dual listing
+"9988.HK" = "@9988"     # Alibaba HK dual listing
+"3750.HK" = "@024O1"    # CATL H-share
+# Korea (price in KRW)
+"005930.KS" = "@SE7"    # Samsung Electronics
+"000660.KS" = "@H7E"    # SK Hynix
+# China A-shares (price in CNY)
+"688256.SS" = "@02YK"   # Cambricon
+"600478.SS" = "@Z1K"    # Hunan Corun
+# Not in this IBES dump: 688795.SS, SNDK (new spinoff; only old-SanDisk
+# pre-WDC-acquisition data is present, last statpers 2016-04-14)

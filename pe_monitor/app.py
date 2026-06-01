@@ -65,27 +65,32 @@ def _collapse_bucket(bucket_rows: list[dict]) -> dict:
     return result
 
 
-def _interpolate_forward_pe(rows: list[dict]) -> list[dict]:
-    """Fill NULL forward_pe values between two real anchors by interpolating
-    implied forward EPS, then deriving fwd P/E from each day's actual price.
+def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list[dict]:
+    """Fill NULL `value_col` (a forward-P/E series) between two real anchors by
+    interpolating implied forward EPS, then deriving the P/E from each day's
+    actual price.
 
-    Why this works: at any anchor date d we know both Price(d) and FwdPE(d)
-    from real data, so ForwardEPS(d) = Price(d) / FwdPE(d) is determined.
-    Between earnings reports, analyst consensus EPS moves slowly (typically
-    1-3% per quarter), so a linear blend of EPS between anchors is a much
-    better assumption than a linear blend of FwdPE itself — the latter
-    would ignore the daily price movements that drive most fwd-P/E variance
-    between earnings.
+    Why this works: at any anchor date d we know both Price(d) and PE(d) from
+    real data, so ForwardEPS(d) = Price(d) / PE(d) is determined. Between
+    earnings reports, analyst consensus EPS moves slowly (typically 1-3% per
+    quarter), so a linear blend of EPS between anchors is a much better
+    assumption than a linear blend of PE itself — the latter would ignore the
+    daily price movements that drive most fwd-P/E variance between earnings.
 
-    Each gap row gets `forward_pe_interpolated: True`; real rows get False.
-    Days outside the [first anchor, last anchor] window stay NULL — better
-    honest empty than fake-confident extrapolation off the edges.
+    This is also what makes the IBES line work from monthly anchors: each
+    anchor stores a dimensionless IBES P/E (PRICE/MEANEST), and the daily
+    yfinance price supplies the between-anchor motion — currency and split
+    factors cancel because only the price *ratio* matters here.
+
+    Each gap row gets `flag_col: True`; real rows get False. Days outside the
+    [first anchor, last anchor] window stay NULL — better honest empty than
+    fake-confident extrapolation off the edges.
     """
     for r in rows:
-        r["forward_pe_interpolated"] = False
+        r[flag_col] = False
     anchors = [
         i for i, r in enumerate(rows)
-        if r.get("forward_pe") is not None and r.get("price")
+        if r.get(value_col) is not None and r.get("price")
     ]
     if len(anchors) < 2:
         return rows
@@ -94,8 +99,8 @@ def _interpolate_forward_pe(rows: list[dict]) -> list[dict]:
         if R_i == L_i + 1:
             continue
         L, R = rows[L_i], rows[R_i]
-        L_eps = L["price"] / L["forward_pe"]
-        R_eps = R["price"] / R["forward_pe"]
+        L_eps = L["price"] / L[value_col]
+        R_eps = R["price"] / R[value_col]
         L_ord = date.fromisoformat(L["date"]).toordinal()
         span = date.fromisoformat(R["date"]).toordinal() - L_ord
         if span <= 0:
@@ -108,8 +113,8 @@ def _interpolate_forward_pe(rows: list[dict]) -> list[dict]:
             eps = L_eps + t * (R_eps - L_eps)
             if eps <= 0:
                 continue  # EPS sign change — linear blend isn't meaningful
-            row["forward_pe"] = row["price"] / eps
-            row["forward_pe_interpolated"] = True
+            row[value_col] = row["price"] / eps
+            row[flag_col] = True
     return rows
 
 
@@ -164,7 +169,8 @@ def api_history(ticker: str):
         CONFIG["database_path"], ticker,
         start_date=start_date, end_date=end_date,
     )
-    rows = _interpolate_forward_pe(rows)
+    rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
+    rows = _interpolate_series(rows, "forward_pe_ibes", "forward_pe_ibes_interpolated")
     return jsonify(_downsample(rows, _pick_bucket(len(rows))))
 
 

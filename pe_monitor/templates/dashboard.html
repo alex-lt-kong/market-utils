@@ -386,6 +386,12 @@ async function loadChart(ticker) {
   const fwdPeInterpRadius = rows.map(r => r.forward_pe_interpolated ? 0 : 1.5);
   const fwdPeInterpHover  = rows.map(r => r.forward_pe_interpolated ? 0 : 4);
 
+  // IBES forward P/E: monthly anchors (PRICE/MEANEST from IBES) interpolated
+  // to daily the same way. Markers only on real anchor months, so the IBES
+  // dots read as a sanity check against the yfinance line between them.
+  const ibesInterpRadius = rows.map(r => r.forward_pe_ibes_interpolated ? 0 : 2);
+  const ibesInterpHover  = rows.map(r => r.forward_pe_ibes_interpolated ? 0 : 4);
+
   const peChart = new Chart(peCtx, {
     type: "line",
     data: {
@@ -394,6 +400,8 @@ async function loadChart(ticker) {
         {label: "TTM P/E", data: rows.map(r => r.ttm_pe), borderColor: "#0d6efd", backgroundColor: "#0d6efd", ...lineStyle},
         {label: "Forward P/E", data: rows.map(r => r.forward_pe), borderColor: "#dc3545", backgroundColor: "#dc3545", ...lineStyle,
          pointRadius: fwdPeInterpRadius, pointHoverRadius: fwdPeInterpHover},
+        {label: "Forward P/E (IBES)", data: rows.map(r => r.forward_pe_ibes), borderColor: "#198754", backgroundColor: "#198754", ...lineStyle,
+         borderDash: [5, 3], pointRadius: ibesInterpRadius, pointHoverRadius: ibesInterpHover},
       ],
     },
     options: {

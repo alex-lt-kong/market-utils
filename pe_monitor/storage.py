@@ -19,6 +19,7 @@ CREATE TABLE IF NOT EXISTS history (
     analyst_count      INTEGER,
     financial_currency TEXT,
     forward_eps_native REAL,
+    forward_pe_ibes    REAL,
     PRIMARY KEY (ticker, date)
 );
 """
@@ -27,6 +28,7 @@ ROW_COLS = (
     "date", "name", "currency", "price", "volume",
     "trailing_eps", "forward_eps", "ttm_pe", "forward_pe",
     "analyst_count", "financial_currency", "forward_eps_native",
+    "forward_pe_ibes",
 )
 
 _MIGRATIONS = (
@@ -34,6 +36,7 @@ _MIGRATIONS = (
     ("financial_currency", "ALTER TABLE history ADD COLUMN financial_currency TEXT"),
     ("forward_eps_native", "ALTER TABLE history ADD COLUMN forward_eps_native REAL"),
     ("volume",             "ALTER TABLE history ADD COLUMN volume INTEGER"),
+    ("forward_pe_ibes",    "ALTER TABLE history ADD COLUMN forward_pe_ibes REAL"),
 )
 
 
@@ -95,6 +98,7 @@ def latest_per_ticker(db_path: str, tickers: list[str]) -> list[dict]:
                 "trailing_eps": None, "forward_eps": None,
                 "ttm_pe": None, "forward_pe": None, "analyst_count": None,
                 "financial_currency": None, "forward_eps_native": None,
+                "forward_pe_ibes": None,
             })
     return result
 
