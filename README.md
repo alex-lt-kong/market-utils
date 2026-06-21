@@ -32,7 +32,7 @@ python -m core --config config.toml
 env var (handy for systemd / direct uvicorn):
 
 ```bash
-MARKET_UTILS_CONFIG=config.toml uvicorn core.main:app --host 0.0.0.0 --port 9090
+MARKET_UTILS_CONFIG=config.toml uvicorn --factory core.main:create_app --host 0.0.0.0 --port 9090
 ```
 
 The host config holds only the shared concerns — `host`, `port`, `secret_key`, and

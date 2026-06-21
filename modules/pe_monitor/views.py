@@ -1,10 +1,12 @@
 """FastAPI router for the P/E Monitor module: dashboard + JSON API.
 
-Was app.py. The host (core/main.py) mounts this router at /pe-monitor and calls
-start_background() on startup to run the crawler.
+Was app.py. Config is loaded lazily and the scheduler is owned by `lifespan`, so
+importing this module has no side effects.
 """
 
+from contextlib import contextmanager
 from datetime import date, timedelta
+from functools import lru_cache
 from pathlib import Path
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -16,11 +18,13 @@ from . import config, scheduler, storage
 SLUG = "pe-monitor"
 _HERE = Path(__file__).resolve().parent
 
-CONFIG = config.load_config()
-storage.init_db(CONFIG["database_path"])
-
 router = APIRouter()
 templates = Jinja2Templates(directory=str(_HERE / "templates"))
+
+
+@lru_cache(maxsize=1)
+def _cfg() -> dict:
+    return config.load_config()
 
 
 # Predefined ranges for /api/history. None = no lower bound (all).
@@ -141,12 +145,13 @@ def _parse_iso_date(s: str | None) -> str | None:
 
 @router.get("/", include_in_schema=False)
 def dashboard(request: Request) -> HTMLResponse:
+    cfg = _cfg()
     return templates.TemplateResponse(
         request,
         "dashboard.html",
         {
-            "tickers": CONFIG["tickers"],
-            "first_live_collection_date": CONFIG.get("first_live_collection_date"),
+            "tickers": cfg["tickers"],
+            "first_live_collection_date": cfg.get("first_live_collection_date"),
             "api_base": f"/{SLUG}/api",
         },
     )
@@ -154,7 +159,7 @@ def dashboard(request: Request) -> HTMLResponse:
 
 @router.get("/api/tickers")
 def api_tickers():
-    return CONFIG["tickers"]
+    return _cfg()["tickers"]
 
 
 @router.get("/api/history/{ticker}")
@@ -164,11 +169,12 @@ def api_history(
     end: str | None = None,
     range_: str = Query("all", alias="range"),
 ):
-    """History endpoint. Window can be specified as either
-    `start`/`end` (ISO, either optional, takes precedence) or a `range` preset
+    """History endpoint. Window can be specified as either `start`/`end` (ISO,
+    either optional, takes precedence) or a `range` preset
     (1m|3m|6m|1y|3y|5y|all). Rows are adaptively downsampled server-side."""
+    cfg = _cfg()
     ticker = ticker.upper()
-    if ticker not in CONFIG["tickers"]:
+    if ticker not in cfg["tickers"]:
         raise HTTPException(status_code=404)
 
     start_date = _parse_iso_date(start)
@@ -182,7 +188,7 @@ def api_history(
             start_date = (date.today() - timedelta(days=days)).isoformat()
 
     rows = storage.read_history(
-        CONFIG["database_path"], ticker,
+        cfg["database_path"], ticker,
         start_date=start_date, end_date=end_date,
     )
     rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
@@ -192,13 +198,15 @@ def api_history(
 
 @router.get("/api/latest")
 def api_latest():
-    return storage.latest_per_ticker(CONFIG["database_path"], CONFIG["tickers"])
+    cfg = _cfg()
+    return storage.latest_per_ticker(cfg["database_path"], cfg["tickers"])
 
 
 @router.post("/api/refresh")
 def api_refresh():
+    cfg = _cfg()
     try:
-        scheduler.snapshot_all(CONFIG["tickers"], CONFIG["database_path"])
+        scheduler.snapshot_all(cfg["tickers"], cfg["database_path"])
     except scheduler.Busy:
         raise HTTPException(status_code=409, detail="snapshot already in progress")
     return {"status": "ok"}
@@ -207,17 +215,17 @@ def api_refresh():
 _scheduler = None
 
 
-def start_background() -> None:
+@contextmanager
+def lifespan():
     global _scheduler
+    cfg = _cfg()
+    storage.init_db(cfg["database_path"])
     _scheduler = scheduler.start_scheduler(
-        CONFIG["tickers"],
-        CONFIG["database_path"],
-        CONFIG["fetch_interval_seconds"],
+        cfg["tickers"], cfg["database_path"], cfg["fetch_interval_seconds"]
     )
-
-
-def stop_background() -> None:
-    global _scheduler
-    if _scheduler is not None:
-        _scheduler.shutdown(wait=False)
-        _scheduler = None
+    try:
+        yield
+    finally:
+        if _scheduler is not None:
+            _scheduler.shutdown(wait=False)
+            _scheduler = None

@@ -6,6 +6,7 @@ a low-coverage pull never overwrites a good result.
 """
 
 import threading
+from contextlib import contextmanager
 from datetime import datetime, timezone
 
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -110,3 +111,12 @@ def stop() -> None:
     if _scheduler is not None:
         _scheduler.shutdown(wait=False)
         _scheduler = None
+
+
+@contextmanager
+def lifespan():
+    start()
+    try:
+        yield
+    finally:
+        stop()

@@ -17,6 +17,5 @@ MODULE = Module(
     icon="📈",
     static_dir=str(_HERE / "static"),
     static_name="pe_monitor_static",
-    on_startup=views.start_background,
-    on_shutdown=views.stop_background,
+    lifespan=views.lifespan,
 )

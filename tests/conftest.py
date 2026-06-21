@@ -1,6 +1,5 @@
-"""Test fixtures. Points the host config at a temp TOML before core.main is
-imported (it loads host config at import today), and offers a make_app factory
-that builds an app with host-config overrides.
+"""Test fixtures. Points the host config at a temp TOML before importing the app,
+and offers a make_app factory that builds an app with host-config overrides.
 """
 
 import os
@@ -18,19 +17,19 @@ os.environ["MARKET_UTILS_CONFIG"] = _CFG
 
 import pytest  # noqa: E402
 
-import core.main as main  # noqa: E402
+from core import config as host_config  # noqa: E402
+from core import main  # noqa: E402
+from core.registry import discover_modules  # noqa: E402
 
 
 @pytest.fixture
 def make_app():
-    base = dict(main.CONFIG)
+    base = host_config.load_config()
+    modules = discover_modules()
 
     def _make(**overrides):
-        main.CONFIG.clear()
-        main.CONFIG.update(base)
-        main.CONFIG.update(overrides)
-        return main.build_app()
+        cfg = dict(base)
+        cfg.update(overrides)
+        return main.build_app(cfg, modules)
 
-    yield _make
-    main.CONFIG.clear()
-    main.CONFIG.update(base)
+    return _make
