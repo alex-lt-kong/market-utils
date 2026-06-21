@@ -217,6 +217,16 @@ const fmtVolumeAxis = v => {
   if (v >= 1e3)  return trim(v/1e3)  + "K";
   return String(Math.round(v));
 };
+const fmtRelativeTime = iso => {
+  if (!iso) return "—";
+  const t = Date.parse(iso);
+  if (Number.isNaN(t)) return "—";
+  let s = Math.max(0, Math.floor((Date.now() - t) / 1000));
+  if (s < 60) return `${s}s ago`;
+  const m = Math.floor(s / 60); if (m < 60) return `${m}m ago`;
+  const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`;
+  return `${Math.floor(h / 24)}d ago`;
+};
 const Y_AXIS_WIDTH = 58;  // pin both charts so date axes line up
 
 // Dashed vertical marker at `first_live_collection_date`. Anything left of
@@ -313,6 +323,9 @@ const COLUMN_DEFS = [
     cellRenderer: p => linkCell(fmtInt(p.value), Y.analysis(p.data.ticker))},
   {field: "forward_pe", headerName: "Fwd P/E", type: "numericColumn", flex: 1,
     cellRenderer: p => linkCell(fmt(p.value), Y.analysis(p.data.ticker)), sort: "asc"},
+  {field: "last_crawl_at", headerName: "Last crawl", flex: 1,
+    cellRenderer: p => fmtRelativeTime(p.value),
+    tooltipValueGetter: p => p.value ? new Date(p.value).toLocaleString() : "no successful crawl yet"},
 ];
 
 // Per-browser column visibility. We persist the *hidden* set (rather than the
@@ -649,6 +662,7 @@ function initPanelSplitter() {
   initColumnChooser();
   updateHistoryPlaceholder();
   await loadSnapshot();
+  setInterval(() => gridApi?.refreshCells({columns: ["last_crawl_at"], force: true}), 30000);
 })();
 </script>
 </body>
