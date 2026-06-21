@@ -1,9 +1,18 @@
-"""`python -m core` — run the unified app with uvicorn."""
+"""`python -m core --config <path>` — run the unified app with uvicorn."""
+
+import argparse
+import os
+
+parser = argparse.ArgumentParser(prog="python -m core")
+parser.add_argument("--config", required=True, help="path to the host config TOML")
+args = parser.parse_args()
+
+# Propagate so core.main loads the same config when uvicorn imports it.
+os.environ["MARKET_UTILS_CONFIG"] = args.config
 
 import uvicorn
 
 from core import config
 
-if __name__ == "__main__":
-    cfg = config.load_config()
-    uvicorn.run("core.main:app", host=cfg["host"], port=cfg["port"])
+cfg = config.load_config()
+uvicorn.run("core.main:app", host=cfg["host"], port=cfg["port"])

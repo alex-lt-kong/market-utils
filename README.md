@@ -18,12 +18,20 @@ authentication and automatic Swagger docs.
 
 ```bash
 pip install -r requirements.txt
-cp config.sample.toml config.toml   # optional; sensible defaults apply without it
-python -m core
+cp config.sample.toml config.toml      # required: --config has no default
+python -m core --config config.toml
 ```
 
-`config.toml` holds only the shared concerns — `host`, `port`, `secret_key`, and
-`auth_tokens`. Each module keeps its own config inside its package.
+`--config` is mandatory; the path is also honored via the `MARKET_UTILS_CONFIG`
+env var (handy for systemd / direct uvicorn):
+
+```bash
+MARKET_UTILS_CONFIG=config.toml uvicorn core.main:app --host 0.0.0.0 --port 8080
+```
+
+The host config holds only the shared concerns — `host`, `port`, `secret_key`, and
+`auth_tokens`. Each module keeps its own config inside its package. On startup the
+app logs the loaded config path, bind address, tokens, and discovered modules.
 
 ## Authentication
 

@@ -23,6 +23,17 @@ MODULES = discover_modules()
 CONFIG = host_config.load_config()
 
 
+def _log_config() -> None:
+    print(f"[market-utils] config:      {host_config.config_source()}")
+    print(f"[market-utils] bind:        {CONFIG['host']}:{CONFIG['port']}")
+    print(f"[market-utils] secret_key:  {CONFIG['secret_key']}")
+    print(f"[market-utils] auth_tokens: {CONFIG['auth_tokens'] or '[]  (auth DISABLED)'}")
+    print(f"[market-utils] modules:     {', '.join(m.slug for m in MODULES) or '(none)'}")
+
+
+_log_config()
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Run startup hooks off the event loop: a module's initial data fetch must

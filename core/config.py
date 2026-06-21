@@ -1,13 +1,16 @@
 """Host config: bind address, cookie secret, and shared auth tokens.
 
-Falls back to safe defaults (auth disabled) when config.toml is absent so the
-app runs out of the box. Module-specific config stays inside each module.
+The config file is mandatory and chosen explicitly via `python -m core --config
+<path>` (which sets MARKET_UTILS_CONFIG). Defaults only fill in keys the file
+omits — an unspecified or missing file is a hard error. Module-specific config
+stays inside each module.
 """
 
+import os
 import tomllib
 from pathlib import Path
 
-_ROOT = Path(__file__).resolve().parent.parent
+_ENV_VAR = "MARKET_UTILS_CONFIG"
 
 _DEFAULTS = {
     "host": "127.0.0.1",
@@ -17,10 +20,21 @@ _DEFAULTS = {
 }
 
 
-def load_config(path: str = "config.toml") -> dict:
+def config_source(path: str | None = None) -> str:
+    chosen = path or os.environ.get(_ENV_VAR)
+    if not chosen:
+        raise RuntimeError(
+            f"No host config specified. Run `python -m core --config <path>` "
+            f"or set {_ENV_VAR}."
+        )
+    return chosen
+
+
+def load_config(path: str | None = None) -> dict:
+    fp = Path(config_source(path))
+    if not fp.exists():
+        raise FileNotFoundError(f"Host config not found: {fp}")
     cfg = dict(_DEFAULTS)
-    fp = _ROOT / path
-    if fp.exists():
-        with open(fp, "rb") as f:
-            cfg.update(tomllib.load(f))
+    with open(fp, "rb") as f:
+        cfg.update(tomllib.load(f))
     return cfg
