@@ -19,9 +19,12 @@ and keeps its own data, templates, and scheduler.
 (`--config` is mandatory; default bind 9090). Auth is off until `auth_tokens` are set;
 when enabled a strong `secret_key` is required or the app refuses to start.
 
-**Next steps / ideas:**
-- Open offer: persist ai_ratios result (JSON snapshot) so it survives restarts.
-- Consider exempting `/healthz` from auth when enabled.
+**Next steps / ideas:** nothing pending.
+
+**Parked (not planned — unnecessary for the current single-process deploy):**
+ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
+
+**Notes:**
 - `build_app(config, modules)` has no import-time side effects; uvicorn runs it via
   `--factory core.main:create_app`. Module schedulers can be turned off with
   `enable_schedulers = false` (web replicas); run schedulers on one instance only.
