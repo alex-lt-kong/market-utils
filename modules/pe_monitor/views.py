@@ -1,17 +1,30 @@
-"""Flask app: serves the dashboard and JSON API, runs the background crawler."""
+"""FastAPI router for the P/E Monitor module: dashboard + JSON API.
 
+Was app.py. Config is loaded lazily and the scheduler is owned by `lifespan`, so
+importing this module has no side effects.
+"""
+
+from contextlib import contextmanager
 from datetime import date, timedelta
+from functools import lru_cache
+from pathlib import Path
 
-from flask import Flask, abort, jsonify, render_template, request
+from fastapi import APIRouter, HTTPException, Query, Request
+from fastapi.responses import HTMLResponse
+from fastapi.templating import Jinja2Templates
 
-import config
-import scheduler
-import storage
+from . import config, scheduler, storage
 
-CONFIG = config.load_config()
-storage.init_db(CONFIG["database_path"])
+SLUG = "pe-monitor"
+_HERE = Path(__file__).resolve().parent
 
-app = Flask(__name__)
+router = APIRouter()
+templates = Jinja2Templates(directory=str(_HERE / "templates"))
+
+
+@lru_cache(maxsize=1)
+def _cfg() -> dict:
+    return config.load_config()
 
 
 # Predefined ranges for /api/history. None = no lower bound (all).
@@ -118,47 +131,56 @@ def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list
     return rows
 
 
-@app.route("/")
-def dashboard():
-    return render_template(
-        "dashboard.html",
-        tickers=CONFIG["tickers"],
-        first_live_collection_date=CONFIG.get("first_live_collection_date"),
-    )
-
-
-@app.route("/api/tickers")
-def api_tickers():
-    return jsonify(CONFIG["tickers"])
-
-
 def _parse_iso_date(s: str | None) -> str | None:
-    """Validate `s` as ISO YYYY-MM-DD. Returns the string on success, None
-    otherwise (invalid input is treated as 'unspecified')."""
+    """Validate `s` as an ISO date and return it canonicalised to YYYY-MM-DD, so
+    basic-format (20240101) or week-date inputs still compare correctly against
+    stored dates. None on invalid/empty input (treated as 'unspecified')."""
     if not s:
         return None
     try:
-        date.fromisoformat(s)
-        return s
+        return date.fromisoformat(s).isoformat()
     except ValueError:
         return None
 
 
-@app.route("/api/history/<ticker>")
-def api_history(ticker: str):
-    """History endpoint. Window can be specified as either:
-      - `?start=YYYY-MM-DD&end=YYYY-MM-DD` (either bound optional), or
-      - `?range=1m|3m|6m|1y|3y|5y|all` (preset).
-    `start`/`end` take precedence over `range`. Rows are adaptively
-    downsampled server-side to stay under TARGET_POINTS."""
-    ticker = ticker.upper()
-    if ticker not in CONFIG["tickers"]:
-        abort(404)
+@router.get("/", include_in_schema=False)
+def dashboard(request: Request) -> HTMLResponse:
+    cfg = _cfg()
+    return templates.TemplateResponse(
+        request,
+        "dashboard.html",
+        {
+            "tickers": cfg["tickers"],
+            "first_live_collection_date": cfg.get("first_live_collection_date"),
+            "api_base": f"/{SLUG}/api",
+        },
+    )
 
-    start_date = _parse_iso_date(request.args.get("start"))
-    end_date = _parse_iso_date(request.args.get("end"))
+
+@router.get("/api/tickers")
+def api_tickers():
+    return _cfg()["tickers"]
+
+
+@router.get("/api/history/{ticker}")
+def api_history(
+    ticker: str,
+    start: str | None = None,
+    end: str | None = None,
+    range_: str = Query("all", alias="range"),
+):
+    """History endpoint. Window can be specified as either `start`/`end` (ISO,
+    either optional, takes precedence) or a `range` preset
+    (1m|3m|6m|1y|3y|5y|all). Rows are adaptively downsampled server-side."""
+    cfg = _cfg()
+    ticker = ticker.upper()
+    if ticker not in cfg["tickers"]:
+        raise HTTPException(status_code=404)
+
+    start_date = _parse_iso_date(start)
+    end_date = _parse_iso_date(end)
     if not start_date and not end_date:
-        rng = request.args.get("range", "all").lower()
+        rng = (range_ or "all").lower()
         if rng not in RANGE_DAYS:
             rng = "all"
         days = RANGE_DAYS[rng]
@@ -166,29 +188,43 @@ def api_history(ticker: str):
             start_date = (date.today() - timedelta(days=days)).isoformat()
 
     rows = storage.read_history(
-        CONFIG["database_path"], ticker,
+        cfg["database_path"], ticker,
         start_date=start_date, end_date=end_date,
     )
     rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
     rows = _interpolate_series(rows, "forward_pe_ibes", "forward_pe_ibes_interpolated")
-    return jsonify(_downsample(rows, _pick_bucket(len(rows))))
+    return _downsample(rows, _pick_bucket(len(rows)))
 
 
-@app.route("/api/latest")
+@router.get("/api/latest")
 def api_latest():
-    return jsonify(storage.latest_per_ticker(CONFIG["database_path"], CONFIG["tickers"]))
+    cfg = _cfg()
+    return storage.latest_per_ticker(cfg["database_path"], cfg["tickers"])
 
 
-@app.route("/api/refresh", methods=["POST"])
+@router.post("/api/refresh")
 def api_refresh():
-    scheduler.snapshot_all(CONFIG["tickers"], CONFIG["database_path"])
-    return jsonify({"status": "ok"})
+    cfg = _cfg()
+    try:
+        scheduler.snapshot_all(cfg["tickers"], cfg["database_path"])
+    except scheduler.Busy:
+        raise HTTPException(status_code=409, detail="snapshot already in progress")
+    return {"status": "ok"}
 
 
-if __name__ == "__main__":
-    scheduler.start_scheduler(
-        CONFIG["tickers"],
-        CONFIG["database_path"],
-        CONFIG["fetch_interval_seconds"],
+@contextmanager
+def lifespan():
+    storage.init_db(_cfg()["database_path"])
+    yield
+
+
+@contextmanager
+def scheduler_lifespan():
+    cfg = _cfg()
+    sched = scheduler.start_scheduler(
+        cfg["tickers"], cfg["database_path"], cfg["fetch_interval_seconds"]
     )
-    app.run(host=CONFIG["host"], port=CONFIG["port"])
+    try:
+        yield
+    finally:
+        sched.shutdown(wait=False)
