@@ -13,7 +13,7 @@ with os.fdopen(_fd, "w") as f:
         'secret_key = "test-secret-key-0123456789abcdef"\n'
         "auth_tokens = []\n"
     )
-os.environ["MARKET_UTILS_CONFIG"] = _CFG
+os.environ["GAMBLERS_TOOLBOX_CONFIG"] = _CFG
 
 import pytest  # noqa: E402
 

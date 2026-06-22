@@ -26,21 +26,21 @@ SESSION_MAX_AGE = 7 * 24 * 60 * 60  # 7 days
 
 
 def _log_config(config: host_config.HostConfig, modules: list) -> None:
-    show = os.environ.get("MARKET_UTILS_LOG_SECRETS", "").lower() in ("1", "true", "yes")
+    show = os.environ.get("GAMBLERS_TOOLBOX_LOG_SECRETS", "").lower() in ("1", "true", "yes")
     tokens = config.auth_tokens
     secret_disp = config.secret_key if show else ("set" if config.secret_key else "unset")
     if show:
         tokens_disp = tokens or "[]  (auth DISABLED)"
     else:
         tokens_disp = f"{len(tokens)} configured" if tokens else "none (auth DISABLED)"
-    print(f"[market-utils] config:      {host_config.config_source()}")
-    print(f"[market-utils] bind:        {config.host}:{config.port}")
-    print(f"[market-utils] secret_key:  {secret_disp}")
-    print(f"[market-utils] auth_tokens: {tokens_disp}")
-    print(f"[market-utils] modules:     {', '.join(m.slug for m in modules) or '(none)'}")
-    print(f"[market-utils] schedulers:  {'on' if config.enable_schedulers else 'off'}")
+    print(f"[gamblers-toolbox] config:      {host_config.config_source()}")
+    print(f"[gamblers-toolbox] bind:        {config.host}:{config.port}")
+    print(f"[gamblers-toolbox] secret_key:  {secret_disp}")
+    print(f"[gamblers-toolbox] auth_tokens: {tokens_disp}")
+    print(f"[gamblers-toolbox] modules:     {', '.join(m.slug for m in modules) or '(none)'}")
+    print(f"[gamblers-toolbox] schedulers:  {'on' if config.enable_schedulers else 'off'}")
     if tokens and not show:
-        print("[market-utils] (set MARKET_UTILS_LOG_SECRETS=1 to print token/secret values)")
+        print("[gamblers-toolbox] (set GAMBLERS_TOOLBOX_LOG_SECRETS=1 to print token/secret values)")
 
 
 def _validate_modules(modules: list) -> None:
@@ -70,7 +70,7 @@ def build_app(config: host_config.HostConfig, modules: list) -> FastAPI:
                         stack.enter_context(m.lifespan())
             yield
 
-    app = FastAPI(title="market-utils", lifespan=lifespan)
+    app = FastAPI(title="Gambler's Toolbox", lifespan=lifespan)
 
     # Gate first, then SessionMiddleware last so it sits outermost and
     # request.session is populated before the gate reads it.

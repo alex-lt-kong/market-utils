@@ -1,7 +1,7 @@
 """Host config: bind address, cookie secret, and shared auth tokens.
 
 A typed (Pydantic) model, loaded from a mandatory TOML chosen via
-`python -m core --config <path>` (or MARKET_UTILS_CONFIG). When auth is enabled
+`python -m core --config <path>` (or GAMBLERS_TOOLBOX_CONFIG). When auth is enabled
 the secret_key must be strong, otherwise the signed session cookie is forgeable.
 Module-specific config stays inside each module.
 """
@@ -12,7 +12,7 @@ from pathlib import Path
 
 from pydantic import BaseModel
 
-_ENV_VAR = "MARKET_UTILS_CONFIG"
+_ENV_VAR = "GAMBLERS_TOOLBOX_CONFIG"
 _DEFAULT_SECRET = "dev-insecure-change-me"
 _MIN_SECRET_LEN = 16
 

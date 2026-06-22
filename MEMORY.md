@@ -2,7 +2,8 @@
 
 ## Active Status
 
-**Objective:** market-utils is now a single FastAPI app (`core/`) that auto-discovers
+**Objective:** Gambler's Toolbox (GitHub `alex-lt-kong/gamblers-toolbox`) is now a
+single FastAPI app (`core/`) that auto-discovers
 plugin **modules** under `modules/` and serves them behind one landing page, one port,
 and one shared auth layer. Each module exposes a `MODULE` descriptor (`core/module.py`)
 and keeps its own data, templates, and scheduler.
@@ -33,6 +34,15 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 
 ## Activity Log
 
+### 2026-06-22 — Rename project to Gambler's Toolbox
+- Renamed branding to **Gambler's Toolbox** / slug `gamblers-toolbox`: FastAPI title,
+  landing page, manifest, icon, README, config comments, log banner prefix.
+- Renamed env vars `MARKET_UTILS_CONFIG`→`GAMBLERS_TOOLBOX_CONFIG`,
+  `MARKET_UTILS_LOG_SECRETS`→`GAMBLERS_TOOLBOX_LOG_SECRETS` (breaking for external
+  launchers; update systemd/launch scripts). Tests updated to match.
+- GitHub repo renamed `market-monitors`→`gamblers-toolbox`; updated the `origin` URL.
+- Left the local working dir name and a stale notebook path string as-is.
+
 ### 2026-06-22 — Refactor: factory, typed config, tests, scheduler flag
 - Added a pytest+TestClient integration suite (`tests/`): config/secret validation, auth
   on/off + revocation, discovery + duplicate-slug rejection, prefixed routes, 409
@@ -44,7 +54,7 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 - `enable_schedulers` host flag (default on) to run background jobs on one instance only.
 
 ### 2026-06-22 — Security & robustness hardening (review follow-up)
-- Secrets masked in the startup banner (opt-in via `MARKET_UTILS_LOG_SECRETS`).
+- Secrets masked in the startup banner (opt-in via `GAMBLERS_TOOLBOX_LOG_SECRETS`).
 - Refuse to start when `auth_tokens` set but `secret_key` is default/empty/short.
 - Sessions store the token hash and revalidate each request, so removing a token revokes
   its cookies; session `max_age` set to 7 days.

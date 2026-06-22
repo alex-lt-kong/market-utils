@@ -1,4 +1,4 @@
-# market-utils
+# Gambler's Toolbox
 
 A unified home for small market tools. One FastAPI app serves a landing page and
 mounts each tool as a self-contained **module**, on a single port with shared
@@ -28,18 +28,18 @@ cp modules/pe_monitor/config.sample.toml modules/pe_monitor/config.toml
 python -m core --config config.toml
 ```
 
-`--config` is mandatory; the path is also honored via the `MARKET_UTILS_CONFIG`
+`--config` is mandatory; the path is also honored via the `GAMBLERS_TOOLBOX_CONFIG`
 env var (handy for systemd / direct uvicorn):
 
 ```bash
-MARKET_UTILS_CONFIG=config.toml uvicorn --factory core.main:create_app --host 0.0.0.0 --port 9090
+GAMBLERS_TOOLBOX_CONFIG=config.toml uvicorn --factory core.main:create_app --host 0.0.0.0 --port 9090
 ```
 
 The host config holds only the shared concerns — `host`, `port`, `secret_key`,
 `auth_tokens`, and `enable_schedulers`. Each module keeps its own config inside its
 package. On startup the
 app logs the loaded config path, bind address, and discovered modules (token and
-secret values are masked unless `MARKET_UTILS_LOG_SECRETS=1`).
+secret values are masked unless `GAMBLERS_TOOLBOX_LOG_SECRETS=1`).
 
 > **Upgrading from the standalone `pe_monitor/` layout?** Its `config.toml` and
 > `pe_history.db`/data are gitignored, so `git pull` won't relocate them. Move them

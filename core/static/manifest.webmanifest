@@ -1,6 +1,6 @@
 {
-  "name": "market-utils",
-  "short_name": "market-utils",
+  "name": "Gambler's Toolbox",
+  "short_name": "Toolbox",
   "description": "A unified home for market tools.",
   "start_url": "/",
   "scope": "/",

@@ -8,7 +8,7 @@ parser.add_argument("--config", required=True, help="path to the host config TOM
 args = parser.parse_args()
 
 # Propagate so core.main.create_app loads the same config when uvicorn calls it.
-os.environ["MARKET_UTILS_CONFIG"] = args.config
+os.environ["GAMBLERS_TOOLBOX_CONFIG"] = args.config
 
 import uvicorn
 

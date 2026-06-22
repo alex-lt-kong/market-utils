@@ -21,7 +21,7 @@ def test_missing_file_raises(tmp_path):
 
 
 def test_unspecified_raises(monkeypatch):
-    monkeypatch.delenv("MARKET_UTILS_CONFIG", raising=False)
+    monkeypatch.delenv("GAMBLERS_TOOLBOX_CONFIG", raising=False)
     with pytest.raises(RuntimeError):
         config.load_config()
 
