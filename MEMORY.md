@@ -39,6 +39,19 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 
 ## Activity Log
 
+### 2026-06-22 — Add Δ-forward-P/E page to pe_monitor (branch `feat/delta-fwd-pe`)
+- New page `/pe-monitor/delta` + `delta.html`: per-ticker forward-P/E change over a
+  selectable window (1D/1W/1M/3M/6M/YTD/1Y), ag-grid leaderboard sorted by |Δ%|, nav
+  links both ways. No schema change.
+- `GET /pe-monitor/api/delta?window=` and `_delta_point` in `views.py`. Live `forward_pe`
+  only (no IBES). Critical: the raw live series is sparse, so it's interpolated to daily
+  (same `_interpolate_series` as the chart) **before** snapping `then` to now−window —
+  otherwise a 1-month delta snaps to an anchor a year back. Interpolated endpoints are
+  flagged (`≈`); `then` is null when the window predates coverage.
+- `tests/test_delta.py` (6 tests): window/snap/interp logic + endpoint shape/fallback. 27 pass.
+- Branch `feat/delta-fwd-pe`, rebased onto `main` after PR #6 (unified-fastapi-landing)
+  merged; pushed for its own PR.
+
 ### 2026-06-22 — Fix review bugs #1, #5, dates; pin dependency set (#2)
 - Split `Module` into `lifespan` (always-run resource setup) + `scheduler` (gated by
   `enable_schedulers`); `core/main.py` enters lifespans on every instance and schedulers
@@ -82,16 +95,5 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 - Module `on_startup`/`on_shutdown` replaced by a per-module `lifespan` context manager.
 - Typed `HostConfig` (Pydantic); startup validates unique slugs + static mount names.
 - `enable_schedulers` host flag (default on) to run background jobs on one instance only.
-
-### 2026-06-22 — Security & robustness hardening (review follow-up)
-- Secrets masked in the startup banner (opt-in via `GAMBLERS_TOOLBOX_LOG_SECRETS`).
-- Refuse to start when `auth_tokens` set but `secret_key` is default/empty/short.
-- Sessions store the token hash and revalidate each request, so removing a token revokes
-  its cookies; session `max_age` set to 7 days.
-- Clear "copy config.sample.toml" errors; README documents per-module config + upgrade
-  data migration.
-- ai_ratios: coverage threshold (keep last-good below 95%), single-flight refresh (409),
-  Wikipedia timeout + bounded Yahoo deadline.
-- Lifecycle: schedulers started synchronously + retained; both modules have on_shutdown.
 
 _(Older entries moved to `MEMORY_ARCHIVE.md`.)_

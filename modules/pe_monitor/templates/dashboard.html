@@ -39,6 +39,9 @@ button{
 }
 button:hover{background:#495057}
 button:disabled{background:#adb5bd;cursor:wait}
+.header-actions{display:flex;align-items:center;gap:.75rem}
+.nav-link{color:var(--accent);text-decoration:none;font-size:.85rem;font-weight:600;white-space:nowrap}
+.nav-link:hover{text-decoration:underline}
 
 .dashboard{display:grid;gap:2rem;margin:1.25rem 0;grid-template-columns:1fr}
 .gutter{display:none}
@@ -143,7 +146,10 @@ canvas{width:100%!important;height:100%!important}
 <body>
 <header id="top">
   <h1>P/E Monitor <span class="meta" id="meta"></span></h1>
-  <button id="refresh-btn" onclick="refresh()">Refresh now</button>
+  <div class="header-actions">
+    <a class="nav-link" href="{{ delta_url }}">Δ Fwd P/E →</a>
+    <button id="refresh-btn" onclick="refresh()">Refresh now</button>
+  </div>
 </header>
 
 <main class="dashboard">

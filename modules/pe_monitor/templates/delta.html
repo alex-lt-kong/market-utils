@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Δ Forward P/E</title>
+<link rel="icon" type="image/svg+xml" href="{{ url_for('pe_monitor_static', path='icon.svg') }}">
+<link rel="alternate icon" type="image/png" sizes="192x192" href="{{ url_for('pe_monitor_static', path='icon-192.png') }}">
+<link rel="apple-touch-icon" href="{{ url_for('pe_monitor_static', path='icon-192.png') }}">
+<link rel="manifest" href="{{ url_for('pe_monitor_static', path='manifest.webmanifest') }}">
+<meta name="theme-color" content="#0d6efd">
+<script src="{{ url_for('pe_monitor_static', path='ag-grid-community.min.js') }}"></script>
+<style>
+:root{
+  --bg:#f8f9fa; --surface:#fff; --ink:#212529; --muted:#6c757d;
+  --border:#dee2e6; --accent:#0d6efd; --up:#198754; --down:#dc3545;
+  --shadow:0 1px 4px rgba(0,0,0,.08); --radius:6px;
+}
+*{box-sizing:border-box}
+body{font-family:system-ui,-apple-system,sans-serif;margin:0;padding:0 1rem 3rem;background:var(--bg);color:var(--ink)}
+header{
+  position:sticky;top:0;z-index:10;background:var(--bg);
+  display:flex;align-items:center;justify-content:space-between;
+  padding:1rem 0;border-bottom:1px solid var(--border);
+}
+header h1{font-size:1.3rem;margin:0;display:flex;align-items:baseline;gap:.5rem;flex-wrap:wrap}
+header .meta{color:var(--muted);font-size:.8rem;font-weight:normal}
+.nav-link{color:var(--accent);text-decoration:none;font-size:.85rem;font-weight:600;white-space:nowrap}
+.nav-link:hover{text-decoration:underline}
+.toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:.5rem;margin:1.25rem 0 .5rem}
+.toolbar h2{font-size:.78rem;color:var(--muted);margin:0;text-transform:uppercase;letter-spacing:.5px;font-weight:600}
+.window-selector{display:flex;gap:.2rem;flex-wrap:wrap}
+.window-btn{
+  background:transparent;color:var(--muted);border:1px solid var(--border);
+  padding:.2rem .6rem;border-radius:4px;cursor:pointer;font-size:.72rem;
+  font-weight:600;letter-spacing:.3px;
+}
+.window-btn:hover{background:var(--surface);color:var(--ink)}
+.window-btn.active{background:var(--accent);color:#fff;border-color:var(--accent)}
+#delta-grid{box-shadow:var(--shadow);border-radius:var(--radius);overflow:hidden;height:calc(100vh - 10rem)}
+#delta-grid .ticker-cell{font-weight:600;color:var(--accent);font-family:ui-monospace,Menlo,monospace}
+#delta-grid .cell-link{color:inherit;text-decoration:none}
+#delta-grid .cell-link:hover{text-decoration:underline}
+#delta-grid .asof{color:var(--muted);font-size:.82em;margin-left:.4em}
+#delta-grid .up{color:var(--up);font-weight:600}
+#delta-grid .down{color:var(--down);font-weight:600}
+#delta-grid .flat{color:var(--muted)}
+</style>
+</head>
+<body>
+<header>
+  <h1>Δ Forward P/E <span class="meta" id="meta"></span></h1>
+  <a class="nav-link" href="{{ home_url }}">← Dashboard</a>
+</header>
+
+<div class="toolbar">
+  <h2>Change over period</h2>
+  <div class="window-selector" id="window-selector">
+    <button class="window-btn" data-window="1d">1D</button>
+    <button class="window-btn" data-window="1w">1W</button>
+    <button class="window-btn active" data-window="1m">1M</button>
+    <button class="window-btn" data-window="3m">3M</button>
+    <button class="window-btn" data-window="6m">6M</button>
+    <button class="window-btn" data-window="ytd">YTD</button>
+    <button class="window-btn" data-window="1y">1Y</button>
+  </div>
+</div>
+
+<div id="delta-grid"></div>
+
+<script>
+const tickers = {{ tickers | tojson }};
+const API_BASE = "{{ api_base }}";
+const Y_QUOTE = t => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}/`;
+const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
+  ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const fmt = v => (v == null ? "N/A" : Number(v).toFixed(2));
+const fmtSigned = v => (v == null ? "N/A" : (v >= 0 ? "+" : "") + Number(v).toFixed(2));
+const fmtPct = v => (v == null ? "N/A" : (v >= 0 ? "+" : "") + (Number(v) * 100).toFixed(1) + "%");
+const asof = d => (d ? `<span class="asof">${d}</span>` : "");
+// "≈" marks an interpolated endpoint: the live forward P/E was sparse near that
+// date, so the value is filled from daily price + implied EPS (same as the chart).
+const valueWithDate = (val, d, interp) =>
+  (val == null ? "N/A" : `${interp ? "≈" : ""}${fmt(val)}${asof(d)}`);
+
+// up = richer (P/E expanded), down = cheaper. Neutral framing, no good/bad.
+const moveClass = {
+  up:   p => p.value != null && p.value > 0,
+  down: p => p.value != null && p.value < 0,
+  flat: p => p.value == null || p.value === 0,
+};
+
+const COLUMN_DEFS = [
+  {field: "ticker", headerName: "Ticker", width: 110, pinned: "left", cellClass: "ticker-cell",
+   cellRenderer: p => `<a href="${Y_QUOTE(p.value)}" target="_blank" rel="noopener" class="cell-link">${p.value}</a>`},
+  {field: "name", headerName: "Company", flex: 2,
+   cellRenderer: p => (p.value ? escapeHtml(p.value) : "—")},
+  {field: "then", headerName: "Fwd P/E (then)", type: "numericColumn", flex: 1.5,
+   cellRenderer: p => valueWithDate(p.value, p.data.then_date, p.data.then_interpolated)},
+  {field: "now", headerName: "Fwd P/E (now)", type: "numericColumn", flex: 1.5,
+   cellRenderer: p => valueWithDate(p.value, p.data.now_date, p.data.now_interpolated)},
+  {field: "delta", headerName: "Δ", type: "numericColumn", flex: 1,
+   cellRenderer: p => fmtSigned(p.value), cellClassRules: moveClass},
+  {field: "delta_pct", headerName: "Δ%", type: "numericColumn", flex: 1,
+   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass, sort: "desc",
+   comparator: (a, b) => (a == null ? -Infinity : a) - (b == null ? -Infinity : b)},
+];
+
+let gridApi;
+function ensureGrid() {
+  if (gridApi) return;
+  agGrid.ModuleRegistry.registerModules([agGrid.AllCommunityModule]);
+  gridApi = agGrid.createGrid(document.getElementById("delta-grid"), {
+    theme: agGrid.themeQuartz.withParams({rowHeight: 32, headerHeight: 36}),
+    columnDefs: COLUMN_DEFS,
+    rowData: [],
+    defaultColDef: {resizable: true, sortable: true},
+    getRowId: ({data}) => data.ticker,
+  });
+}
+
+let currentWindow = "1m";
+function setWindow(w) {
+  if (w === currentWindow) return;
+  currentWindow = w;
+  document.querySelectorAll(".window-btn").forEach(b =>
+    b.classList.toggle("active", b.dataset.window === w));
+  loadDelta();
+}
+
+// Initial order: biggest absolute move first; rows without a `then` value sink
+// to the bottom. The Δ% header is sortable for signed re-ordering.
+const mag = r => (r.delta_pct == null ? -Infinity : Math.abs(r.delta_pct));
+
+async function loadDelta() {
+  const res = await fetch(`${API_BASE}/delta?window=${currentWindow}`);
+  const data = await res.json();
+  data.sort((a, b) => mag(b) - mag(a));
+  ensureGrid();
+  gridApi.setGridOption("rowData", data);
+  const n = data.filter(r => r.delta_pct != null).length;
+  document.getElementById("meta").textContent =
+    `· ${n}/${tickers.length} tickers with a full window`;
+}
+
+(async () => {
+  document.querySelectorAll(".window-btn").forEach(b =>
+    b.addEventListener("click", () => setWindow(b.dataset.window)));
+  await loadDelta();
+})();
+</script>
+</body>
+</html>
