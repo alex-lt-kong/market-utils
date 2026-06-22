@@ -77,6 +77,30 @@ def read_history(
     return [dict(r) for r in rows]
 
 
+def latest_value_date(
+    db_path: str,
+    ticker: str,
+    column: str,
+    on_or_before: str | None = None,
+    require_price: bool = False,
+) -> str | None:
+    """Latest date for `ticker` where `column` is non-NULL, optionally on/before
+    `on_or_before` and requiring a positive price. None when nothing matches.
+    Used to bound the delta read to the relevant anchor instead of all history."""
+    if column not in ROW_COLS:
+        raise ValueError(f"unknown column: {column}")
+    sql = f"SELECT MAX(date) FROM history WHERE ticker = ? AND {column} IS NOT NULL"
+    params: list = [ticker.upper()]
+    if require_price:
+        sql += " AND price > 0"
+    if on_or_before:
+        sql += " AND date <= ?"
+        params.append(on_or_before)
+    with sqlite3.connect(db_path) as conn:
+        row = conn.execute(sql, params).fetchone()
+    return row[0] if row and row[0] else None
+
+
 def latest_per_ticker(db_path: str, tickers: list[str]) -> list[dict]:
     """Return the most-recent row per requested ticker, with empty stubs for
     tickers that have no rows yet. Order matches the input `tickers` list."""

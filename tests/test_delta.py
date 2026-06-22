@@ -1,6 +1,7 @@
 from fastapi.testclient import TestClient
 
-from modules.pe_monitor.views import DELTA_WINDOWS, _delta_point
+from modules.pe_monitor import config as pcfg, storage
+from modules.pe_monitor.views import DELTA_WINDOWS, _delta_point, _delta_rows
 
 # Sparse live forward_pe: two real anchors with one priced gap day between them.
 # EPS is constant (price/pe == 10 at both anchors), so the gap interpolates to
@@ -56,3 +57,15 @@ def test_api_delta_shape_and_window_fallback(make_app):
 
 def test_delta_page_renders(make_app):
     assert TestClient(make_app()).get("/pe-monitor/delta").status_code == 200
+
+
+def test_bounded_read_matches_full_history():
+    # The bounded per-ticker read must yield exactly what interpolating the whole
+    # history would — the optimization must not change any delta value.
+    cfg = pcfg.load_config()
+    db = cfg["database_path"]
+    for t in cfg["tickers"][:6]:
+        for days, ytd in [(1, False), (31, False), (366, False), (None, True)]:
+            full = _delta_point(storage.read_history(db, t), days, ytd)
+            bounded = _delta_point(_delta_rows(db, t, days, ytd), days, ytd)
+            assert full == bounded, (t, days, ytd)
