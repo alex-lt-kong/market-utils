@@ -79,7 +79,8 @@ MODULE = Module(
     name="My Tool",
     description="One line for the landing card.",
     router=views.router,
-    on_startup=...,           # optional: start the module's own scheduler
+    lifespan=...,             # optional CM: resource setup (e.g. init the DB)
+    scheduler=...,            # optional CM: background jobs (skipped if disabled)
     static_dir=...,           # optional: served at /my-tool/static
 )
 ```

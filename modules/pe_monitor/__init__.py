@@ -18,4 +18,5 @@ MODULE = Module(
     static_dir=str(_HERE / "static"),
     static_name="pe_monitor_static",
     lifespan=views.lifespan,
+    scheduler=views.scheduler_lifespan,
 )

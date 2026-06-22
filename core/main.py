@@ -59,15 +59,18 @@ def build_app(config: host_config.HostConfig, modules: list) -> FastAPI:
 
     @asynccontextmanager
     async def lifespan(app: FastAPI):
-        # Each module owns its resources via its own context manager; they start
-        # synchronously here (fast) and are torn down on shutdown in reverse.
-        # Schedulers can be disabled (e.g. on web replicas) so background jobs
-        # run on exactly one instance.
+        # `lifespan` (resource setup, e.g. DB init) runs on every instance.
+        # `scheduler` (background jobs) is skipped when enable_schedulers is off,
+        # so web replicas still initialise but jobs run on exactly one instance.
+        # Teardown is reverse order: schedulers stop before resources close.
         with ExitStack() as stack:
+            for m in modules:
+                if m.lifespan is not None:
+                    stack.enter_context(m.lifespan())
             if config.enable_schedulers:
                 for m in modules:
-                    if m.lifespan is not None:
-                        stack.enter_context(m.lifespan())
+                    if m.scheduler is not None:
+                        stack.enter_context(m.scheduler())
             yield
 
     app = FastAPI(title="Gambler's Toolbox", lifespan=lifespan)

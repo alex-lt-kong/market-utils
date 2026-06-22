@@ -10,5 +10,5 @@ MODULE = Module(
     description="Share of the S&P 500 attributable to AI exposure, refreshed on a schedule.",
     router=views.router,
     icon="🤖",
-    lifespan=cache.lifespan,
+    scheduler=cache.scheduler_lifespan,
 )

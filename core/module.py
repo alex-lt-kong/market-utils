@@ -22,6 +22,8 @@ class Module:
     icon: Optional[str] = None
     static_dir: Optional[str] = None   # abs path mounted at /<slug>/static
     static_name: Optional[str] = None  # url_for name (match the template)
-    # Zero-arg callable returning a context manager that owns the module's
-    # resources (scheduler, db). Entered on startup, exited on shutdown.
+    # Resource setup (e.g. create/migrate the DB). Entered on every instance.
     lifespan: Optional[Callable[[], AbstractContextManager]] = None
+    # Background jobs. Skipped when the host runs with enable_schedulers=false,
+    # so replicas still initialise but jobs run on exactly one instance.
+    scheduler: Optional[Callable[[], AbstractContextManager]] = None

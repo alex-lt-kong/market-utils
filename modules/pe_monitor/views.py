@@ -132,13 +132,13 @@ def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list
 
 
 def _parse_iso_date(s: str | None) -> str | None:
-    """Validate `s` as ISO YYYY-MM-DD. Returns the string on success, None
-    otherwise (invalid input is treated as 'unspecified')."""
+    """Validate `s` as an ISO date and return it canonicalised to YYYY-MM-DD, so
+    basic-format (20240101) or week-date inputs still compare correctly against
+    stored dates. None on invalid/empty input (treated as 'unspecified')."""
     if not s:
         return None
     try:
-        date.fromisoformat(s)
-        return s
+        return date.fromisoformat(s).isoformat()
     except ValueError:
         return None
 
@@ -212,20 +212,19 @@ def api_refresh():
     return {"status": "ok"}
 
 
-_scheduler = None
+@contextmanager
+def lifespan():
+    storage.init_db(_cfg()["database_path"])
+    yield
 
 
 @contextmanager
-def lifespan():
-    global _scheduler
+def scheduler_lifespan():
     cfg = _cfg()
-    storage.init_db(cfg["database_path"])
-    _scheduler = scheduler.start_scheduler(
+    sched = scheduler.start_scheduler(
         cfg["tickers"], cfg["database_path"], cfg["fetch_interval_seconds"]
     )
     try:
         yield
     finally:
-        if _scheduler is not None:
-            _scheduler.shutdown(wait=False)
-            _scheduler = None
+        sched.shutdown(wait=False)

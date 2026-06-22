@@ -2,11 +2,16 @@
 
 ## Active Status
 
-**Objective:** Gambler's Toolbox (GitHub `alex-lt-kong/gamblers-toolbox`) is now a
-single FastAPI app (`core/`) that auto-discovers
-plugin **modules** under `modules/` and serves them behind one landing page, one port,
-and one shared auth layer. Each module exposes a `MODULE` descriptor (`core/module.py`)
-and keeps its own data, templates, and scheduler.
+**Objective:** Gambler's Toolbox (GitHub `alex-lt-kong/gamblers-toolbox`) is a single
+FastAPI app (`core/`) that auto-discovers plugin modules under `modules/` behind one
+landing page, one port, and one shared auth layer. A review (see log) raised five bugs
++ refactors; #1, #5, and the `_parse_iso_date` bug are now fixed.
+
+**Immediate next steps (remaining review items):** #3 bound AI-ratios Yahoo work with
+per-call network timeouts (executor deadline can't kill running threads); #4 token-in-URL
+is by-design (shareable links) — only revisit if you want POST/Authorization; small
+refactors left: `extra="forbid"` on HostConfig, port/slug validation, scope
+`latest_per_ticker` to requested tickers; pin deps / move TestClient to httpx2.
 
 - `core/` — host shell: `module.py` (interface), `registry.py` (discovery), `auth.py`
   (token→cookie gate), typed `config.py` (Pydantic `HostConfig`), `main.py`
@@ -20,19 +25,41 @@ and keeps its own data, templates, and scheduler.
 (`--config` is mandatory; default bind 9090). Auth is off until `auth_tokens` are set;
 when enabled a strong `secret_key` is required or the app refuses to start.
 
-**Next steps / ideas:** nothing pending.
-
 **Parked (not planned — unnecessary for the current single-process deploy):**
 ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 
 **Notes:**
+- `Module` now has two hooks: `lifespan` (resource setup, e.g. DB init — runs on every
+  instance) and `scheduler` (background jobs — skipped when `enable_schedulers=false`).
+  Each hook owns a local scheduler instance (no module globals).
 - `build_app(config, modules)` has no import-time side effects; uvicorn runs it via
-  `--factory core.main:create_app`. Module schedulers can be turned off with
-  `enable_schedulers = false` (web replicas); run schedulers on one instance only.
+  `--factory core.main:create_app`. Run schedulers on one instance only.
 - Refreshes are single-flight; ai_ratios keeps last-known-good below 95% coverage.
-- Tests: `pip install -r requirements-dev.txt && python -m pytest` (19 integration tests).
+- Tests: `pip install -r requirements-dev.txt && python -m pytest` (21 integration tests).
 
 ## Activity Log
+
+### 2026-06-22 — Fix review bugs #1, #5, and date parsing
+- Split `Module` into `lifespan` (always-run resource setup) + `scheduler` (gated by
+  `enable_schedulers`); `core/main.py` enters lifespans on every instance and schedulers
+  only when enabled — so a scheduler-disabled replica still runs `init_db` (#1).
+- Both module schedulers now live in a local variable inside their `scheduler` CM; the
+  module-global `_scheduler` (and ai_ratios `start`/`stop`) are gone, so concurrent app
+  instances no longer clobber each other (#5).
+- `_parse_iso_date` canonicalises via `.isoformat()` so basic-format/week-date inputs no
+  longer break SQLite lexical date comparisons.
+- Tests: rewrote lifecycle tests (instance capture + a schedulers-disabled-still-inits
+  guard), added `_parse_iso_date` unit tests; README module example updated. 21 pass.
+
+### 2026-06-22 — Review unified FastAPI branch
+- Reviewed the complete `main...origin/feat/unified-fastapi-landing` diff; the
+  19-test suite hangs on its first request with the currently resolved unbounded
+  FastAPI/Starlette/httpx dependency set.
+- Found scheduler-disabled replicas skip P/E database initialization/migrations;
+  global scheduler ownership makes app lifespans non-reentrant.
+- Found AI-ratios timeout leaves running worker threads behind and URL query-token
+  authentication exposes bearer secrets to normal request logging.
+- Noted strict config/date validation and stale module-example docs as cleanup work.
 
 ### 2026-06-22 — Rename project to Gambler's Toolbox
 - Renamed branding to **Gambler's Toolbox** / slug `gamblers-toolbox`: FastAPI title,
@@ -64,15 +91,4 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   Wikipedia timeout + bounded Yahoo deadline.
 - Lifecycle: schedulers started synchronously + retained; both modules have on_shutdown.
 
-### 2026-06-22 — Unify pe_monitor + ai_ratios under one FastAPI app
-- Built `core/` host shell with a pluggable `Module` interface and auto-discovery of
-  `modules/*` exposing `MODULE`.
-- Moved `pe_monitor/` → `modules/pe_monitor/` (git mv; backfill `_bootstrap` unaffected).
-  Converted `app.py` → `views.py` (APIRouter); made `scheduler.py` imports relative;
-  fixed dashboard `url_for(path=)`, prefixed client `fetch` calls and the manifest.
-- Built `modules/ai_ratios/` from the old `ai_ratios.py` CLI: split compute (`core.py`),
-  added cache + own scheduler (`cache.py`), router + Jinja dashboard. Dropped the CLI.
-- Added shared auth (`SessionMiddleware` + token gate), default-disabled.
-- Consolidated dependencies into a single top-level `requirements.txt` (FastAPI/uvicorn;
-  dropped Flask). Verified end-to-end: landing, both modules, static, `/docs` (tagged per
-  module), auth on/off, and backfill imports.
+_(Older entries moved to `MEMORY_ARCHIVE.md`.)_

@@ -27,7 +27,6 @@ _state: dict = {
     "stale": False,
     "last_error": None,
 }
-_scheduler: BackgroundScheduler | None = None
 
 
 class Busy(Exception):
@@ -93,30 +92,16 @@ def _scheduled_refresh() -> None:
         print(f"  ai_ratios: scheduled refresh failed ({e})")
 
 
-def start() -> None:
-    global _scheduler
-    if _scheduler is not None:
-        return
-    _scheduler = BackgroundScheduler()
-    _scheduler.add_job(
+@contextmanager
+def scheduler_lifespan():
+    sched = BackgroundScheduler()
+    sched.add_job(
         _scheduled_refresh, "interval",
         seconds=config.REFRESH_INTERVAL_SECONDS, id="ai_ratios_refresh",
     )
-    _scheduler.add_job(_scheduled_refresh, id="ai_ratios_initial")  # one-off, ASAP
-    _scheduler.start()
-
-
-def stop() -> None:
-    global _scheduler
-    if _scheduler is not None:
-        _scheduler.shutdown(wait=False)
-        _scheduler = None
-
-
-@contextmanager
-def lifespan():
-    start()
+    sched.add_job(_scheduled_refresh, id="ai_ratios_initial")  # one-off, ASAP
+    sched.start()
     try:
         yield
     finally:
-        stop()
+        sched.shutdown(wait=False)
