@@ -34,6 +34,10 @@ RANGE_DAYS = {
     "all": None,
 }
 
+# Lookback windows for the Δ-forward-P/E page. Day counts mirror RANGE_DAYS;
+# "ytd" is special-cased (baseline = latest value on/before Jan 1).
+DELTA_WINDOWS = {"1d": 1, "1w": 7, "1m": 31, "3m": 92, "6m": 183, "1y": 366}
+
 # Adaptive downsampling: pick the smallest bucket that keeps the response
 # under TARGET_POINTS. Within each bucket we keep the last (most recent)
 # observation — P/E moves slowly enough that last-in-bucket reads cleanly.
@@ -131,6 +135,58 @@ def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list
     return rows
 
 
+def _window_target(now_date: str, days: int | None, ytd: bool) -> str:
+    """Snap date for the `then` endpoint: Jan 1 of `now`'s year (YTD) or
+    now - `days`."""
+    nd = date.fromisoformat(now_date)
+    return (date(nd.year, 1, 1) if ytd else nd - timedelta(days=days)).isoformat()
+
+
+def _delta_rows(db_path: str, ticker: str, days: int | None, ytd: bool) -> list[dict]:
+    """Rows needed to compute a ticker's delta point, bounded to
+    [latest forward_pe+price anchor on/before the window target, now] so we don't
+    read and interpolate the full multi-year series on every request. That anchor
+    is the left edge of the gap `then` falls in, so interpolating this slice
+    matches interpolating the whole history. Falls back to the full series only
+    when no priced anchor predates the target (thin/young tickers)."""
+    now_date = storage.latest_value_date(db_path, ticker, "forward_pe")
+    if now_date is None:
+        return []
+    target = _window_target(now_date, days, ytd)
+    start = storage.latest_value_date(
+        db_path, ticker, "forward_pe", on_or_before=target, require_price=True
+    )
+    return storage.read_history(db_path, ticker, start_date=start)
+
+
+def _delta_point(rows: list[dict], days: int | None, ytd: bool) -> dict:
+    """Forward-P/E change from `now` (latest value) to `then` (value on/before
+    now - window). The live forward_pe series is sparse (live snapshots + a few
+    backfilled anchors), so we interpolate it to daily exactly as the chart does
+    before snapping — otherwise a 1-month delta could read off an anchor a year
+    back. Live forward_pe only, never IBES. `*_interpolated` flags the endpoint
+    as a filled value; `then` is None when the window predates coverage."""
+    rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
+    pts = [(r["date"], r["forward_pe"], r["forward_pe_interpolated"])
+           for r in rows if r.get("forward_pe") is not None]
+    empty = {"now_date": None, "now": None, "now_interpolated": None,
+             "then_date": None, "then": None, "then_interpolated": None,
+             "delta": None, "delta_pct": None}
+    if not pts:
+        return empty
+    now_date, now_val, now_interp = pts[-1]
+    target = _window_target(now_date, days, ytd)
+    then = next(((d, v, fl) for d, v, fl in reversed(pts) if d <= target), None)
+    if then is None:
+        return {**empty, "now_date": now_date, "now": now_val,
+                "now_interpolated": now_interp}
+    then_date, then_val, then_interp = then
+    delta = now_val - then_val
+    return {"now_date": now_date, "now": now_val, "now_interpolated": now_interp,
+            "then_date": then_date, "then": then_val, "then_interpolated": then_interp,
+            "delta": delta, "delta_pct": (delta / then_val) if then_val else None}
+
+
 def _parse_iso_date(s: str | None) -> str | None:
     """Validate `s` as an ISO date and return it canonicalised to YYYY-MM-DD, so
     basic-format (20240101) or week-date inputs still compare correctly against
@@ -153,6 +209,20 @@ def dashboard(request: Request) -> HTMLResponse:
             "tickers": cfg["tickers"],
             "first_live_collection_date": cfg.get("first_live_collection_date"),
             "api_base": f"/{SLUG}/api",
+            "delta_url": f"/{SLUG}/delta",
+        },
+    )
+
+
+@router.get("/delta", include_in_schema=False)
+def delta_page(request: Request) -> HTMLResponse:
+    return templates.TemplateResponse(
+        request,
+        "delta.html",
+        {
+            "tickers": _cfg()["tickers"],
+            "api_base": f"/{SLUG}/api",
+            "home_url": f"/{SLUG}/",
         },
     )
 
@@ -160,6 +230,26 @@ def dashboard(request: Request) -> HTMLResponse:
 @router.get("/api/tickers")
 def api_tickers():
     return _cfg()["tickers"]
+
+
+@router.get("/api/delta")
+def api_delta(window: str = Query("1m")):
+    """Per-ticker forward-P/E change over `window` (1d|1w|1m|3m|6m|1y|ytd),
+    using live forward_pe only. `then` snaps to the most recent value on/before
+    now - window; null when the window predates the ticker's coverage."""
+    cfg = _cfg()
+    w = (window or "1m").lower()
+    ytd = w == "ytd"
+    days = DELTA_WINDOWS.get(w)
+    if not ytd and days is None:
+        w, days = "1m", DELTA_WINDOWS["1m"]
+    out = []
+    for t in cfg["tickers"]:
+        rows = _delta_rows(cfg["database_path"], t, days, ytd)
+        name = next((r["name"] for r in reversed(rows) if r.get("name")), "")
+        out.append({"ticker": t, "name": name, "window": w,
+                    **_delta_point(rows, days, ytd)})
+    return out
 
 
 @router.get("/api/history/{ticker}")

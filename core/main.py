@@ -55,6 +55,7 @@ def _validate_modules(modules: list) -> None:
 
 
 def build_app(config: host_config.HostConfig, modules: list) -> FastAPI:
+    host_config.check_secret(config)
     _validate_modules(modules)
 
     @asynccontextmanager
