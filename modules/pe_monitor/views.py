@@ -295,6 +295,32 @@ def api_delta(window: str = Query("1m")):
     return out
 
 
+def _history_rows(
+    db_path: str, ticker: str, start_date: str | None, end_date: str | None
+) -> list[dict]:
+    """Interpolated history for [start_date, end_date]. When a start is given we
+    read back to the last real anchor (forward_pe and IBES, each with a price) on
+    or before it, so interpolation has a left anchor across a window-start gap,
+    then clip to the requested window. Otherwise a window starting inside a sparse
+    gap would show a blank P/E segment until the next in-window anchor."""
+    read_start = start_date
+    if start_date:
+        anchors = [
+            storage.latest_value_date(db_path, ticker, col,
+                                      on_or_before=start_date, require_price=True)
+            for col in ("forward_pe", "forward_pe_ibes")
+        ]
+        anchors = [a for a in anchors if a]
+        if anchors:
+            read_start = min(anchors + [start_date])
+    rows = storage.read_history(db_path, ticker, start_date=read_start, end_date=end_date)
+    rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
+    rows = _interpolate_series(rows, "forward_pe_ibes", "forward_pe_ibes_interpolated")
+    if start_date:
+        rows = [r for r in rows if r["date"] >= start_date]
+    return rows
+
+
 @router.get("/api/history/{ticker}")
 def api_history(
     ticker: str,
@@ -320,12 +346,7 @@ def api_history(
         if days:
             start_date = (date.today() - timedelta(days=days)).isoformat()
 
-    rows = storage.read_history(
-        cfg["database_path"], ticker,
-        start_date=start_date, end_date=end_date,
-    )
-    rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
-    rows = _interpolate_series(rows, "forward_pe_ibes", "forward_pe_ibes_interpolated")
+    rows = _history_rows(cfg["database_path"], ticker, start_date, end_date)
     return _downsample(rows, _pick_bucket(len(rows)))
 
 

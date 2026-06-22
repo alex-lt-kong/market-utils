@@ -561,12 +561,19 @@ function onDateChange() {
   renderCharts();
 }
 
+// Bumped on every render trigger; a fetch whose seq is stale is dropped so a
+// slow earlier response can't populate the cache or render after a newer one.
+let renderSeq = 0;
 async function renderCharts() {
+  const seq = ++renderSeq;
   await Promise.all([...visibleCharts].map(async t => {
     if (historyRows.has(t)) return;
     const res = await fetch(`{{ api_base }}/history/${t}?${historyQuery()}`);
-    historyRows.set(t, await res.json());
+    const rows = await res.json();
+    if (seq !== renderSeq) return;   // superseded — drop stale response
+    historyRows.set(t, rows);
   }));
+  if (seq !== renderSeq) return;     // superseded — don't render stale data
   const labels = unionDates();
   for (const t of visibleCharts) renderChart(t, labels);
 }
@@ -750,7 +757,11 @@ function initPanelSplitter() {
   document.querySelectorAll(".range-btn").forEach(btn => {
     btn.addEventListener("click", () => setRange(btn.dataset.range));
   });
-  const today = new Date().toISOString().slice(0, 10);
+  // Local Y-M-D, not toISOString() (UTC) — else "today" is unavailable during
+  // early local hours in positive-offset zones.
+  const now = new Date();
+  const pad = n => String(n).padStart(2, "0");
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
   for (const id of ["start-date", "end-date"]) {
     const el = document.getElementById(id);
     el.max = today;
