@@ -46,6 +46,28 @@ header .meta{color:var(--muted);font-size:.8rem;font-weight:normal}
 #delta-grid .down{color:var(--down);font-weight:600}
 #delta-grid .flat{color:var(--muted)}
 #delta-grid .spark{display:block;margin-top:3px}
+.toolbar-right{display:flex;align-items:center;gap:.5rem;flex-wrap:wrap}
+.col-chooser{position:relative}
+.col-chooser-btn{
+  background:transparent;color:var(--muted);border:1px solid var(--border);
+  padding:.2rem .6rem;border-radius:4px;cursor:pointer;font-size:.72rem;
+  font-weight:600;letter-spacing:.3px;
+}
+.col-chooser-btn:hover{background:var(--surface);color:var(--ink)}
+.col-menu{
+  position:absolute;right:0;top:calc(100% + 4px);z-index:20;
+  background:var(--surface);border:1px solid var(--border);
+  border-radius:var(--radius);box-shadow:var(--shadow);
+  padding:.35rem;min-width:170px;display:none;
+}
+.col-menu.open{display:block}
+.col-menu label{
+  display:flex;align-items:center;gap:.5rem;padding:.3rem .45rem;
+  font-size:.82rem;cursor:pointer;border-radius:4px;white-space:nowrap;
+}
+.col-menu label:hover{background:var(--bg)}
+.col-menu input{cursor:pointer;margin:0}
+.col-menu label.locked{opacity:.55;cursor:not-allowed}
 </style>
 </head>
 <body>
@@ -56,14 +78,21 @@ header .meta{color:var(--muted);font-size:.8rem;font-weight:normal}
 
 <div class="toolbar">
   <h2>Change over period</h2>
-  <div class="window-selector" id="window-selector">
-    <button class="window-btn" data-window="1d">1D</button>
-    <button class="window-btn" data-window="1w">1W</button>
-    <button class="window-btn active" data-window="1m">1M</button>
-    <button class="window-btn" data-window="3m">3M</button>
-    <button class="window-btn" data-window="6m">6M</button>
-    <button class="window-btn" data-window="ytd">YTD</button>
-    <button class="window-btn" data-window="1y">1Y</button>
+  <div class="toolbar-right">
+    <div class="window-selector" id="window-selector">
+      <button class="window-btn" data-window="1d">1D</button>
+      <button class="window-btn" data-window="1w">1W</button>
+      <button class="window-btn active" data-window="1m">1M</button>
+      <button class="window-btn" data-window="3m">3M</button>
+      <button class="window-btn" data-window="6m">6M</button>
+      <button class="window-btn" data-window="ytd">YTD</button>
+      <button class="window-btn" data-window="1y">1Y</button>
+    </div>
+    <div class="col-chooser">
+      <button type="button" class="col-chooser-btn" id="col-chooser-btn"
+              aria-haspopup="true" aria-expanded="false">Columns ▾</button>
+      <div class="col-menu" id="col-menu" role="menu"></div>
+    </div>
   </div>
 </div>
 
@@ -78,6 +107,8 @@ const escapeHtml = s => String(s).replace(/[&<>"']/g, c =>
 const fmt = v => (v == null ? "N/A" : Number(v).toFixed(2));
 const fmtSigned = v => (v == null ? "N/A" : (v >= 0 ? "+" : "") + Number(v).toFixed(2));
 const fmtPct = v => (v == null ? "N/A" : (v >= 0 ? "+" : "") + (Number(v) * 100).toFixed(1) + "%");
+const fmtPp = v => (v == null ? "N/A" : (v >= 0 ? "+" : "") + (Number(v) * 100).toFixed(1) + "pp");
+const numCmp = (a, b) => (a == null ? -Infinity : a) - (b == null ? -Infinity : b);
 const asof = d => (d ? `<span class="asof">${d}</span>` : "");
 // "≈" marks an interpolated endpoint: the live forward P/E was sparse near that
 // date, so the value is filled from daily price + implied EPS (same as the chart).
@@ -122,9 +153,77 @@ const COLUMN_DEFS = [
   {field: "delta", headerName: "Δ", type: "numericColumn", flex: 1,
    cellRenderer: p => fmtSigned(p.value), cellClassRules: moveClass},
   {field: "delta_pct", headerName: "Δ%", type: "numericColumn", flex: 1,
-   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass,
-   comparator: (a, b) => (a == null ? -Infinity : a) - (b == null ? -Infinity : b)},
+   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass, comparator: numCmp},
+  {field: "price_change_pct", headerName: "Δ Price", type: "numericColumn", flex: 1,
+   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass, comparator: numCmp,
+   headerTooltip: "Price change over the window"},
+  {field: "eps_change_pct", headerName: "Δ Fwd EPS", type: "numericColumn", flex: 1.1,
+   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass, comparator: numCmp,
+   headerTooltip: "Implied forward EPS (price / forward P/E) change over the window"},
+  {field: "price_contrib", headerName: "from Price", type: "numericColumn", flex: 1.1,
+   cellRenderer: p => fmtPp(p.value), cellClassRules: moveClass, comparator: numCmp,
+   headerTooltip: "Price's exact contribution to Δ% (from Price + from EPS = Δ%)"},
+  {field: "eps_contrib", headerName: "from EPS", type: "numericColumn", flex: 1.1,
+   cellRenderer: p => fmtPp(p.value), cellClassRules: moveClass, comparator: numCmp,
+   headerTooltip: "EPS's exact contribution to Δ% (rising EPS lowers P/E)"},
 ];
+
+// Per-browser column visibility. We persist the *hidden* set so columns added
+// later default to shown. The ticker column is locked on.
+const COLS_KEY = "delta-hidden-cols";
+const LOCKED_COLS = new Set(["ticker"]);
+
+function loadHiddenCols() {
+  try { return new Set(JSON.parse(localStorage.getItem(COLS_KEY)) || []); }
+  catch { return new Set(); }
+}
+function saveHiddenCols(set) {
+  localStorage.setItem(COLS_KEY, JSON.stringify([...set]));
+}
+function applyColumnVisibility() {
+  const hidden = loadHiddenCols();
+  for (const def of COLUMN_DEFS) {
+    const visible = LOCKED_COLS.has(def.field) || !hidden.has(def.field);
+    gridApi.setColumnsVisible([def.field], visible);
+  }
+}
+function buildColumnChooser() {
+  const menu = document.getElementById("col-menu");
+  const hidden = loadHiddenCols();
+  menu.innerHTML = "";
+  for (const def of COLUMN_DEFS) {
+    const locked = LOCKED_COLS.has(def.field);
+    const label = document.createElement("label");
+    if (locked) label.classList.add("locked");
+    const cb = document.createElement("input");
+    cb.type = "checkbox";
+    cb.checked = locked || !hidden.has(def.field);
+    cb.disabled = locked;
+    cb.addEventListener("change", () => {
+      const h = loadHiddenCols();
+      if (cb.checked) h.delete(def.field); else h.add(def.field);
+      saveHiddenCols(h);
+      gridApi.setColumnsVisible([def.field], cb.checked);
+    });
+    label.append(cb, document.createTextNode(def.headerName));
+    menu.appendChild(label);
+  }
+}
+function initColumnChooser() {
+  const btn = document.getElementById("col-chooser-btn");
+  const menu = document.getElementById("col-menu");
+  if (!btn || !menu) return;
+  btn.addEventListener("click", e => {
+    e.stopPropagation();
+    const open = menu.classList.toggle("open");
+    btn.setAttribute("aria-expanded", String(open));
+  });
+  menu.addEventListener("click", e => e.stopPropagation());
+  document.addEventListener("click", () => {
+    menu.classList.remove("open");
+    btn.setAttribute("aria-expanded", "false");
+  });
+}
 
 let gridApi;
 function ensureGrid() {
@@ -137,6 +236,8 @@ function ensureGrid() {
     defaultColDef: {resizable: true, sortable: true},
     getRowId: ({data}) => data.ticker,
   });
+  applyColumnVisibility();
+  buildColumnChooser();
 }
 
 let currentWindow = "1m";
@@ -166,6 +267,7 @@ async function loadDelta() {
 (async () => {
   document.querySelectorAll(".window-btn").forEach(b =>
     b.addEventListener("click", () => setWindow(b.dataset.window)));
+  initColumnChooser();
   await loadDelta();
 })();
 </script>

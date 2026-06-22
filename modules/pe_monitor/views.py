@@ -168,6 +168,30 @@ def _sparkline_series(values: list[float], n: int = 48) -> list[float]:
     return [values[round(i * step)] for i in range(n)]
 
 
+def _safe_div(a, b):
+    return (a / b) if (a is not None and b) else None
+
+
+def _decompose(then_price, now_price, then_pe, now_pe) -> dict:
+    """Split the forward-P/E % change into price and EPS movement. Implied
+    forward EPS = price / forward_pe, so P/E = price / EPS holds exactly and the
+    contributions add up: price_contrib + eps_contrib == delta_pct. `*_change_pct`
+    are each driver's raw move over the window; `*_contrib` are their exact share
+    of ΔP/E%. Fields are None when a price or EPS is missing/zero."""
+    then_eps = _safe_div(then_price, then_pe)
+    now_eps = _safe_div(now_price, now_pe)
+    out = {"then_eps": then_eps, "now_eps": now_eps,
+           "price_change_pct": None, "eps_change_pct": None,
+           "price_contrib": None, "eps_contrib": None}
+    if not (then_price and now_price and then_eps and now_eps):
+        return out
+    rp = now_price / then_price
+    reps = now_eps / then_eps
+    out.update(price_change_pct=rp - 1, eps_change_pct=reps - 1,
+               price_contrib=(rp - 1) / reps, eps_contrib=(1 / reps) - 1)
+    return out
+
+
 def _delta_point(rows: list[dict], days: int | None, ytd: bool) -> dict:
     """Forward-P/E change from `now` (latest value) to `then` (value on/before
     now - window). The live forward_pe series is sparse (live snapshots + a few
@@ -175,29 +199,35 @@ def _delta_point(rows: list[dict], days: int | None, ytd: bool) -> dict:
     before snapping — otherwise a 1-month delta could read off an anchor a year
     back. Live forward_pe only, never IBES. `*_interpolated` flags the endpoint
     as a filled value; `then` is None when the window predates coverage. `series`
-    is the interpolated forward_pe over the window (then..now) for a sparkline."""
+    is the interpolated forward_pe over the window (then..now) for a sparkline;
+    the price/EPS decomposition fields explain the move (see `_decompose`)."""
     rows = _interpolate_series(rows, "forward_pe", "forward_pe_interpolated")
-    pts = [(r["date"], r["forward_pe"], r["forward_pe_interpolated"])
+    pts = [(r["date"], r["forward_pe"], r["forward_pe_interpolated"], r.get("price"))
            for r in rows if r.get("forward_pe") is not None]
     empty = {"now_date": None, "now": None, "now_interpolated": None,
              "then_date": None, "then": None, "then_interpolated": None,
-             "delta": None, "delta_pct": None, "series": []}
+             "delta": None, "delta_pct": None, "series": [],
+             "then_price": None, "now_price": None, "then_eps": None, "now_eps": None,
+             "price_change_pct": None, "eps_change_pct": None,
+             "price_contrib": None, "eps_contrib": None}
     if not pts:
         return empty
-    now_date, now_val, now_interp = pts[-1]
+    now_date, now_val, now_interp, now_price = pts[-1]
     target = _window_target(now_date, days, ytd)
-    then = next(((d, v, fl) for d, v, fl in reversed(pts) if d <= target), None)
+    then = next((p for p in reversed(pts) if p[0] <= target), None)
     window_start = then[0] if then else target
-    series = _sparkline_series([v for d, v, _ in pts if d >= window_start])
+    series = _sparkline_series([v for d, v, *_ in pts if d >= window_start])
     if then is None:
         return {**empty, "now_date": now_date, "now": now_val,
-                "now_interpolated": now_interp, "series": series}
-    then_date, then_val, then_interp = then
+                "now_interpolated": now_interp, "now_price": now_price,
+                "now_eps": _safe_div(now_price, now_val), "series": series}
+    then_date, then_val, then_interp, then_price = then
     delta = now_val - then_val
     return {"now_date": now_date, "now": now_val, "now_interpolated": now_interp,
             "then_date": then_date, "then": then_val, "then_interpolated": then_interp,
             "delta": delta, "delta_pct": (delta / then_val) if then_val else None,
-            "series": series}
+            "series": series, "then_price": then_price, "now_price": now_price,
+            **_decompose(then_price, now_price, then_val, now_val)}
 
 
 def _parse_iso_date(s: str | None) -> str | None:
