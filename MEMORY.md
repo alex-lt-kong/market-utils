@@ -7,11 +7,11 @@ FastAPI app (`core/`) that auto-discovers plugin modules under `modules/` behind
 landing page, one port, and one shared auth layer. A review (see log) raised five bugs
 + refactors; #1, #5, and the `_parse_iso_date` bug are now fixed.
 
-**Immediate next steps (remaining review items):** #3 bound AI-ratios Yahoo work with
-per-call network timeouts (executor deadline can't kill running threads); #4 token-in-URL
+**Immediate next steps (remaining review items):** bound AI-ratios Yahoo work with
+per-call network timeouts (executor deadline can't kill running threads); token-in-URL
 is by-design (shareable links) — only revisit if you want POST/Authorization; small
-refactors left: `extra="forbid"` on HostConfig, port/slug validation, scope
-`latest_per_ticker` to requested tickers.
+refactors left: port/slug validation, scope `latest_per_ticker` to requested tickers,
+widen `ibes.*.csv` gitignore pattern to also catch `.csv.zip`.
 
 - `core/` — host shell: `module.py` (interface), `registry.py` (discovery), `auth.py`
   (token→cookie gate), typed `config.py` (Pydantic `HostConfig`), `main.py`
@@ -38,6 +38,23 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 - Tests: `pip install -r requirements-dev.txt && python -m pytest` (21 integration tests).
 
 ## Activity Log
+
+### 2026-06-22 — Review fixes on `feat/delta-fwd-pe` (sort, config hardening, delta perf)
+- Reviewed the whole project; fixed four items, each its own commit:
+  1. Delta page sorted wrong — the `delta_pct` column's `sort: "desc"` overrode the JS
+     magnitude sort. Dropped it so default order is |Δ%|-desc (header still sortable).
+  2. `HostConfig` now `extra="forbid"` — a typo'd `auth_token` no longer silently
+     disables auth.
+  3. `build_app` calls `check_secret` (renamed from `_check_secret`) so a weak secret +
+     auth is rejected regardless of construction path, not just via `load_config`.
+  4. `api_delta` read the full per-ticker history (back to 1986, ~10k rows × 39) every
+     request. New `storage.latest_value_date` + `views._delta_rows` bound the read to
+     `[latest forward_pe+price anchor <= window target, now]`; provably identical to the
+     full interpolation (full-read fallback when no priced anchor predates target).
+     ~29x faster for 1M, ~5x for 1Y/YTD. `_window_target` shared by `_delta_rows`/`_delta_point`.
+- Tests: +`test_unknown_key_rejected`, +`test_build_app_rejects_weak_secret_with_auth`,
+  +`test_bounded_read_matches_full_history` (6 tickers × 4 windows). 30 pass.
+- Also trimmed README 103→65 lines.
 
 ### 2026-06-22 — Add Δ-forward-P/E page to pe_monitor (branch `feat/delta-fwd-pe`)
 - New page `/pe-monitor/delta` + `delta.html`: per-ticker forward-P/E change over a
@@ -85,15 +102,5 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   launchers; update systemd/launch scripts). Tests updated to match.
 - GitHub repo renamed `market-monitors`→`gamblers-toolbox`; updated the `origin` URL.
 - Left the local working dir name and a stale notebook path string as-is.
-
-### 2026-06-22 — Refactor: factory, typed config, tests, scheduler flag
-- Added a pytest+TestClient integration suite (`tests/`): config/secret validation, auth
-  on/off + revocation, discovery + duplicate-slug rejection, prefixed routes, 409
-  concurrent refresh, lifecycle, schedulers-disabled.
-- `build_app(config, modules)` is now a pure factory with no import-time config/DB side
-  effects; uvicorn uses `--factory core.main:create_app`; pe_monitor config is lazy.
-- Module `on_startup`/`on_shutdown` replaced by a per-module `lifespan` context manager.
-- Typed `HostConfig` (Pydantic); startup validates unique slugs + static mount names.
-- `enable_schedulers` host flag (default on) to run background jobs on one instance only.
 
 _(Older entries moved to `MEMORY_ARCHIVE.md`.)_

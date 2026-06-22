@@ -2,6 +2,16 @@
 
 Older activity-log entries pruned from `MEMORY.md` (newest first).
 
+### 2026-06-22 — Refactor: factory, typed config, tests, scheduler flag
+- Added a pytest+TestClient integration suite (`tests/`): config/secret validation, auth
+  on/off + revocation, discovery + duplicate-slug rejection, prefixed routes, 409
+  concurrent refresh, lifecycle, schedulers-disabled.
+- `build_app(config, modules)` is now a pure factory with no import-time config/DB side
+  effects; uvicorn uses `--factory core.main:create_app`; pe_monitor config is lazy.
+- Module `on_startup`/`on_shutdown` replaced by a per-module `lifespan` context manager.
+- Typed `HostConfig` (Pydantic); startup validates unique slugs + static mount names.
+- `enable_schedulers` host flag (default on) to run background jobs on one instance only.
+
 ### 2026-06-22 — Security & robustness hardening (review follow-up)
 - Secrets masked in the startup banner (opt-in via `GAMBLERS_TOOLBOX_LOG_SECRETS`).
 - Refuse to start when `auth_tokens` set but `secret_key` is default/empty/short.
