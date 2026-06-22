@@ -292,6 +292,21 @@ Chart.register(cutoffLinePlugin);
 let gridApi;
 const visibleCharts = new Set();
 const chartInstances = new Map();
+const historyRows = new Map();   // ticker -> fetched rows for the current range
+
+// Stacked charts share one categorical x-axis: the sorted union of every selected
+// ticker's dates. Each ticker's series is aligned onto it, null where that ticker
+// has no row — so a shorter-history name simply stays blank where it has no data.
+function unionDates() {
+  const set = new Set();
+  for (const t of visibleCharts)
+    for (const r of (historyRows.get(t) || [])) set.add(r.date);
+  return [...set].sort();
+}
+function alignRows(rows, labels) {
+  const byDate = new Map((rows || []).map(r => [r.date, r]));
+  return labels.map(d => byDate.get(d) || null);
+}
 
 const Y = {
   quote:    t => `https://finance.yahoo.com/quote/${encodeURIComponent(t)}/`,
@@ -413,14 +428,6 @@ function updateHistoryPlaceholder() {
   if (ph) ph.style.display = visibleCharts.size === 0 ? "" : "none";
 }
 
-function showChart(ticker) {
-  const card = document.getElementById(`chart-card-${ticker}`);
-  if (!card) return;
-  card.style.display = "";
-  visibleCharts.add(ticker);
-  loadChart(ticker);
-}
-
 function destroyCharts(ticker) {
   const inst = chartInstances.get(ticker);
   if (!inst) return;
@@ -429,25 +436,29 @@ function destroyCharts(ticker) {
   chartInstances.delete(ticker);
 }
 
-function hideChart(ticker) {
-  const card = document.getElementById(`chart-card-${ticker}`);
-  if (!card) return;
-  card.style.display = "none";
-  destroyCharts(ticker);
-  visibleCharts.delete(ticker);
-}
-
 function onSelectionChanged() {
   const selected = new Set(gridApi.getSelectedRows().map(r => r.ticker));
   let newlyAdded = null;
   for (const t of selected) {
-    if (!visibleCharts.has(t)) { showChart(t); newlyAdded = t; }
+    if (!visibleCharts.has(t)) {
+      document.getElementById(`chart-card-${t}`).style.display = "";
+      visibleCharts.add(t);
+      newlyAdded = t;
+    }
   }
   for (const t of [...visibleCharts]) {
-    if (!selected.has(t)) hideChart(t);
+    if (!selected.has(t)) {
+      document.getElementById(`chart-card-${t}`).style.display = "none";
+      destroyCharts(t);
+      historyRows.delete(t);
+      visibleCharts.delete(t);
+    }
   }
   updateHistoryPlaceholder();
-  if (newlyAdded) {
+  // Adding/removing a ticker can widen or narrow the shared axis, so re-render
+  // every visible chart against the new union, not just the one that changed.
+  renderCharts().then(() => {
+    if (!newlyAdded) return;
     requestAnimationFrame(() => {
       const card = document.getElementById(`chart-card-${newlyAdded}`);
       if (!card) return;
@@ -456,7 +467,7 @@ function onSelectionChanged() {
       void card.offsetWidth;
       card.classList.add("flash");
     });
-  }
+  });
 }
 
 function ensureGrid() {
@@ -499,12 +510,22 @@ function setRange(range) {
   document.querySelectorAll(".range-btn").forEach(btn => {
     btn.classList.toggle("active", btn.dataset.range === range);
   });
-  for (const t of visibleCharts) loadChart(t);
+  historyRows.clear();
+  renderCharts();
 }
 
-async function loadChart(ticker) {
-  const res = await fetch(`{{ api_base }}/history/${ticker}?range=${currentRange}`);
-  const rows = await res.json();
+async function renderCharts() {
+  await Promise.all([...visibleCharts].map(async t => {
+    if (historyRows.has(t)) return;
+    const res = await fetch(`{{ api_base }}/history/${t}?range=${currentRange}`);
+    historyRows.set(t, await res.json());
+  }));
+  const labels = unionDates();
+  for (const t of visibleCharts) renderChart(t, labels);
+}
+
+function renderChart(ticker, labels) {
+  const rows = historyRows.get(ticker) || [];
   const peContainer = document.getElementById(`container-${ticker}`);
   const volContainer = document.getElementById(`vol-container-${ticker}`);
   const latestEl = document.getElementById(`latest-${ticker}`);
@@ -528,7 +549,12 @@ async function loadChart(ticker) {
   const peCtx = document.getElementById(`chart-${ticker}`);
   const volCtx = document.getElementById(`chart-vol-${ticker}`);
 
-  const labels = rows.map(r => r.date);
+  // Align this ticker's rows onto the shared label set; dates it lacks become
+  // null (blank), so stacked charts line up on the same date axis.
+  const aligned = alignRows(rows, labels);
+  const col = field => aligned.map(r => (r ? r[field] ?? null : null));
+  const flagRadius = (field, on) => aligned.map(r => (r && r[field] ? 0 : on));
+
   const pinWidth = axis => { axis.width = Y_AXIS_WIDTH; };
   const lineStyle = {tension: 0.2, spanGaps: true, borderWidth: 1.5, pointRadius: 1.5, pointHoverRadius: 4};
 
@@ -536,24 +562,24 @@ async function loadChart(ticker) {
   // from implied EPS + daily price. We hide point markers on interpolated
   // segments so real anchors stand out as dots; the line itself stays
   // continuous so the trend reads cleanly.
-  const fwdPeInterpRadius = rows.map(r => r.forward_pe_interpolated ? 0 : 1.5);
-  const fwdPeInterpHover  = rows.map(r => r.forward_pe_interpolated ? 0 : 4);
+  const fwdPeInterpRadius = flagRadius("forward_pe_interpolated", 1.5);
+  const fwdPeInterpHover  = flagRadius("forward_pe_interpolated", 4);
 
   // IBES forward P/E: monthly anchors (PRICE/MEANEST from IBES) interpolated
   // to daily the same way. Markers only on real anchor months, so the IBES
   // dots read as a sanity check against the yfinance line between them.
-  const ibesInterpRadius = rows.map(r => r.forward_pe_ibes_interpolated ? 0 : 2);
-  const ibesInterpHover  = rows.map(r => r.forward_pe_ibes_interpolated ? 0 : 4);
+  const ibesInterpRadius = flagRadius("forward_pe_ibes_interpolated", 2);
+  const ibesInterpHover  = flagRadius("forward_pe_ibes_interpolated", 4);
 
   const peChart = new Chart(peCtx, {
     type: "line",
     data: {
       labels,
       datasets: [
-        {label: "TTM P/E", data: rows.map(r => r.ttm_pe), borderColor: "#0d6efd", backgroundColor: "#0d6efd", ...lineStyle},
-        {label: "Forward P/E", data: rows.map(r => r.forward_pe), borderColor: "#dc3545", backgroundColor: "#dc3545", ...lineStyle,
+        {label: "TTM P/E", data: col("ttm_pe"), borderColor: "#0d6efd", backgroundColor: "#0d6efd", ...lineStyle},
+        {label: "Forward P/E", data: col("forward_pe"), borderColor: "#dc3545", backgroundColor: "#dc3545", ...lineStyle,
          pointRadius: fwdPeInterpRadius, pointHoverRadius: fwdPeInterpHover},
-        {label: "Forward P/E (IBES)", data: rows.map(r => r.forward_pe_ibes), borderColor: "#198754", backgroundColor: "#198754", ...lineStyle,
+        {label: "Forward P/E (IBES)", data: col("forward_pe_ibes"), borderColor: "#198754", backgroundColor: "#198754", ...lineStyle,
          borderDash: [5, 3], pointRadius: ibesInterpRadius, pointHoverRadius: ibesInterpHover},
       ],
     },
@@ -575,7 +601,7 @@ async function loadChart(ticker) {
       labels,
       datasets: [{
         label: "Volume",
-        data: rows.map(r => r.volume),
+        data: col("volume"),
         backgroundColor: "rgba(108, 117, 125, 0.55)",
         borderWidth: 0,
       }],
@@ -610,7 +636,8 @@ async function refresh() {
   try {
     await fetch("{{ api_base }}/refresh", {method: "POST"});
     await loadSnapshot();
-    for (const t of visibleCharts) await loadChart(t);
+    historyRows.clear();
+    await renderCharts();
   } finally {
     btn.disabled = false;
     btn.textContent = "Refresh now";
