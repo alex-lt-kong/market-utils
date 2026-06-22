@@ -11,7 +11,7 @@ landing page, one port, and one shared auth layer. A review (see log) raised fiv
 per-call network timeouts (executor deadline can't kill running threads); #4 token-in-URL
 is by-design (shareable links) — only revisit if you want POST/Authorization; small
 refactors left: `extra="forbid"` on HostConfig, port/slug validation, scope
-`latest_per_ticker` to requested tickers; pin deps / move TestClient to httpx2.
+`latest_per_ticker` to requested tickers.
 
 - `core/` — host shell: `module.py` (interface), `registry.py` (discovery), `auth.py`
   (token→cookie gate), typed `config.py` (Pydantic `HostConfig`), `main.py`
@@ -39,7 +39,7 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 
 ## Activity Log
 
-### 2026-06-22 — Fix review bugs #1, #5, and date parsing
+### 2026-06-22 — Fix review bugs #1, #5, dates; pin dependency set (#2)
 - Split `Module` into `lifespan` (always-run resource setup) + `scheduler` (gated by
   `enable_schedulers`); `core/main.py` enters lifespans on every instance and schedulers
   only when enabled — so a scheduler-disabled replica still runs `init_db` (#1).
@@ -50,6 +50,9 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   longer break SQLite lexical date comparisons.
 - Tests: rewrote lifecycle tests (instance capture + a schedulers-disabled-still-inits
   guard), added `_parse_iso_date` unit tests; README module example updated. 21 pass.
+- #2: pinned requirements to the tested set (compatible-release `~=`), incl. starlette.
+  Stayed on `httpx` for TestClient (the deprecation points at an unverified `httpx2`
+  package — sandbox flagged it as supply-chain risk); silenced the warning in `pytest.ini`.
 
 ### 2026-06-22 — Review unified FastAPI branch
 - Reviewed the complete `main...origin/feat/unified-fastapi-landing` diff; the
