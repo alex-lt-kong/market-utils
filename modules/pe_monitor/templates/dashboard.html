@@ -11,6 +11,7 @@
 <meta name="theme-color" content="#0d6efd">
 <script src="{{ url_for('pe_monitor_static', path='ag-grid-community.min.js') }}"></script>
 <script src="{{ url_for('pe_monitor_static', path='chart.umd.js') }}"></script>
+<script src="{{ url_for('pe_monitor_static', path='grid-prefs.js') }}"></script>
 <style>
 :root{
   --bg:#f8f9fa; --surface:#fff; --ink:#212529; --muted:#6c757d;
@@ -377,67 +378,7 @@ const COLUMN_DEFS = [
     tooltipValueGetter: p => p.value ? new Date(p.value).toLocaleString() : "no successful crawl yet"},
 ];
 
-// Per-browser column visibility. We persist the *hidden* set (rather than the
-// visible one) so columns added to COLUMN_DEFS later default to shown. The
-// ticker column is locked on — it carries the row-selection checkboxes.
-const COLS_KEY = "pe-hidden-cols";
-const LOCKED_COLS = new Set(["ticker"]);
-
-function loadHiddenCols() {
-  try { return new Set(JSON.parse(localStorage.getItem(COLS_KEY)) || []); }
-  catch { return new Set(); }
-}
-function saveHiddenCols(set) {
-  localStorage.setItem(COLS_KEY, JSON.stringify([...set]));
-}
-
-function applyColumnVisibility() {
-  const hidden = loadHiddenCols();
-  for (const def of COLUMN_DEFS) {
-    const visible = LOCKED_COLS.has(def.field) || !hidden.has(def.field);
-    gridApi.setColumnsVisible([def.field], visible);
-  }
-}
-
-function buildColumnChooser() {
-  const menu = document.getElementById("col-menu");
-  const hidden = loadHiddenCols();
-  menu.innerHTML = "";
-  for (const def of COLUMN_DEFS) {
-    const locked = LOCKED_COLS.has(def.field);
-    const label = document.createElement("label");
-    if (locked) label.classList.add("locked");
-    const cb = document.createElement("input");
-    cb.type = "checkbox";
-    cb.checked = locked || !hidden.has(def.field);
-    cb.disabled = locked;
-    cb.addEventListener("change", () => {
-      const h = loadHiddenCols();
-      if (cb.checked) h.delete(def.field); else h.add(def.field);
-      saveHiddenCols(h);
-      gridApi.setColumnsVisible([def.field], cb.checked);
-    });
-    label.append(cb, document.createTextNode(def.headerName));
-    menu.appendChild(label);
-  }
-}
-
-function initColumnChooser() {
-  const btn = document.getElementById("col-chooser-btn");
-  const menu = document.getElementById("col-menu");
-  if (!btn || !menu) return;
-  btn.addEventListener("click", e => {
-    e.stopPropagation();
-    const open = menu.classList.toggle("open");
-    btn.setAttribute("aria-expanded", String(open));
-  });
-  // Close on outside click; keep open when interacting with the menu itself.
-  menu.addEventListener("click", e => e.stopPropagation());
-  document.addEventListener("click", () => {
-    menu.classList.remove("open");
-    btn.setAttribute("aria-expanded", "false");
-  });
-}
+let gridPrefs;  // shared column visibility/width persistence (grid-prefs.js)
 
 function updateHistoryPlaceholder() {
   const ph = document.getElementById("history-placeholder");
@@ -504,8 +445,12 @@ function ensureGrid() {
     getRowId: ({data}) => data.ticker,
     onSelectionChanged,
   });
-  applyColumnVisibility();
-  buildColumnChooser();
+  gridPrefs = GridPrefs.create({
+    gridApi, columnDefs: COLUMN_DEFS, hiddenKey: "pe-hidden-cols",
+    locked: ["ticker"],
+    chooserBtn: document.getElementById("col-chooser-btn"),
+    chooserMenu: document.getElementById("col-menu"),
+  });
 }
 
 async function loadSnapshot() {
@@ -768,7 +713,6 @@ function initPanelSplitter() {
     el.addEventListener("change", onDateChange);
   }
   initPanelSplitter();
-  initColumnChooser();
   updateHistoryPlaceholder();
   await loadSnapshot();
   // Re-fetch so a background crawl shows up without manual refresh; re-render
