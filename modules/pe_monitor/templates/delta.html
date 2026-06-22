@@ -102,7 +102,7 @@ const COLUMN_DEFS = [
   {field: "delta", headerName: "Δ", type: "numericColumn", flex: 1,
    cellRenderer: p => fmtSigned(p.value), cellClassRules: moveClass},
   {field: "delta_pct", headerName: "Δ%", type: "numericColumn", flex: 1,
-   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass, sort: "desc",
+   cellRenderer: p => fmtPct(p.value), cellClassRules: moveClass,
    comparator: (a, b) => (a == null ? -Infinity : a) - (b == null ? -Infinity : b)},
 ];
 

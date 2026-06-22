@@ -58,6 +58,11 @@ def test_auth_revocation(make_app):
     assert cb.get("/pe-monitor/api/tickers", follow_redirects=False).status_code == 401
 
 
+def test_build_app_rejects_weak_secret_with_auth(make_app):
+    with pytest.raises(RuntimeError):
+        make_app(auth_tokens=["x"], secret_key="short")
+
+
 def test_duplicate_slugs_rejected():
     from fastapi import APIRouter
     from core import config as hc

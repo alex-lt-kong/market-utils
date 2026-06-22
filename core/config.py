@@ -10,7 +10,7 @@ import os
 import tomllib
 from pathlib import Path
 
-from pydantic import BaseModel
+from pydantic import BaseModel, ConfigDict
 
 _ENV_VAR = "GAMBLERS_TOOLBOX_CONFIG"
 _DEFAULT_SECRET = "dev-insecure-change-me"
@@ -18,6 +18,10 @@ _MIN_SECRET_LEN = 16
 
 
 class HostConfig(BaseModel):
+    # Reject unknown keys: a typo'd `auth_token`/`auth-tokens` would otherwise
+    # leave auth_tokens empty and silently disable the auth gate.
+    model_config = ConfigDict(extra="forbid")
+
     host: str = "127.0.0.1"
     port: int = 9090
     secret_key: str = _DEFAULT_SECRET
@@ -35,7 +39,7 @@ def config_source(path: str | None = None) -> str:
     return chosen
 
 
-def _check_secret(cfg: HostConfig) -> None:
+def check_secret(cfg: HostConfig) -> None:
     if cfg.auth_tokens:
         sk = cfg.secret_key
         if not sk or sk == _DEFAULT_SECRET or len(sk) < _MIN_SECRET_LEN:
@@ -54,5 +58,5 @@ def load_config(path: str | None = None) -> HostConfig:
     with open(fp, "rb") as f:
         data = tomllib.load(f)
     cfg = HostConfig(**data)
-    _check_secret(cfg)
+    check_secret(cfg)
     return cfg

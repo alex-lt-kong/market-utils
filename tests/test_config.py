@@ -42,6 +42,12 @@ def test_default_secret_ok_when_auth_off(tmp_path):
     assert config.load_config(_write(tmp_path, body)).auth_tokens == []
 
 
+def test_unknown_key_rejected(tmp_path):
+    # A typo'd `auth_token` must fail loudly, not silently disable auth.
+    with pytest.raises(Exception):
+        config.load_config(_write(tmp_path, 'auth_token = ["x"]\n'))
+
+
 def test_module_config_missing_gives_clear_error():
     from modules.pe_monitor import config as pcfg
     with pytest.raises(FileNotFoundError):
