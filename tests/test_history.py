@@ -3,7 +3,13 @@ import tempfile
 from datetime import date, timedelta
 
 from modules.pe_monitor import storage
-from modules.pe_monitor.views import _history_rows, _interpolate_series
+from modules.pe_monitor.views import (
+    _collapse_bucket,
+    _downsample,
+    _history_rows,
+    _interpolate_series,
+    _pick_bucket,
+)
 
 
 def _mkdb(rows):
@@ -95,3 +101,136 @@ def test_interpolate_nulls_zero_pe():
           for r in _interpolate_series([dict(r) for r in rows], "forward_pe", "f_i")}
     assert by["2026-01-01"] is None     # zero nulled, not plotted at y:0
     assert by["2026-02-01"] == 10.0
+
+
+def test_collapse_bucket_preserves_loss_over_recovered_last_row():
+    # A historical bucket: a loss earlier in it must survive even when the last row
+    # recovered — otherwise coarse zoom hides the break/band the daily view shows.
+    bucket = [
+        {"date": "2024-01-01", "forward_pe": None, "forward_pe_loss": True,
+         "forward_pe_ibes": None, "forward_pe_ibes_loss": True,
+         "ttm_pe": None, "trailing_eps": -1.0, "volume": 10},
+        {"date": "2024-01-15", "forward_pe": 12.0, "forward_pe_loss": False,
+         "forward_pe_ibes": 11.0, "forward_pe_ibes_loss": False,
+         "ttm_pe": 8.0, "trailing_eps": 3.0, "volume": 20},
+    ]
+    out = _collapse_bucket(bucket)
+    assert out["forward_pe"] is None and out["forward_pe_loss"] is True
+    assert out["forward_pe_ibes"] is None and out["forward_pe_ibes_loss"] is True
+    assert out["ttm_pe"] is None          # TTM loss preserved despite recovered last row
+    assert out["volume"] == 30            # volume still sums
+
+
+def test_collapse_bucket_keeps_last_when_no_loss():
+    bucket = [
+        {"date": "2024-01-01", "forward_pe": 10.0, "forward_pe_loss": False,
+         "ttm_pe": 9.0, "trailing_eps": 3.0, "volume": 10},
+        {"date": "2024-01-15", "forward_pe": 12.0, "forward_pe_loss": False,
+         "ttm_pe": 8.0, "trailing_eps": 3.0, "volume": 20},
+    ]
+    out = _collapse_bucket(bucket)
+    assert out["forward_pe"] == 12.0 and out["ttm_pe"] == 8.0 and out["volume"] == 30
+
+
+def test_collapse_bucket_open_keeps_recovered_last_value():
+    # The open (latest) bucket drives the chart endpoint + header: a loss earlier in
+    # it that recovered by the last row must NOT null today's value to a gap/N/A.
+    bucket = [
+        {"date": "2024-01-01", "forward_pe": None, "forward_pe_loss": True,
+         "forward_pe_ibes": None, "forward_pe_ibes_loss": True,
+         "ttm_pe": None, "trailing_eps": -1.0, "volume": 10},
+        {"date": "2024-01-15", "forward_pe": 12.0, "forward_pe_loss": False,
+         "forward_pe_ibes": 11.0, "forward_pe_ibes_loss": False,
+         "ttm_pe": 8.0, "trailing_eps": 3.0, "volume": 20},
+    ]
+    out = _collapse_bucket(bucket, is_open=True)
+    assert out["forward_pe"] == 12.0 and not out["forward_pe_loss"]
+    assert out["forward_pe_ibes"] == 11.0 and not out["forward_pe_ibes_loss"]
+    assert out["ttm_pe"] == 8.0
+    assert out["volume"] == 30            # volume still sums
+
+
+def test_downsample_open_bucket_keeps_recovered_endpoint():
+    # End to end through _downsample: a loss inside the final (open) bucket whose
+    # last raw row recovered must leave the chart endpoint on the recovered value,
+    # while a historical loss bucket still collapses to a gap.
+    base = date(2022, 1, 1)
+    rows = [{"date": (base + timedelta(days=i)).isoformat(), "price": 100.0,
+             "forward_pe": 10.0, "forward_pe_loss": False,
+             "ttm_pe": 9.0, "trailing_eps": 3.0, "volume": 5} for i in range(900)]
+    bucket = _pick_bucket(len(rows))
+    assert bucket > 1                                  # downsampling actually engages
+    last_b = date.fromisoformat(rows[-1]["date"]).toordinal() // bucket
+    last_idxs = [i for i, r in enumerate(rows)
+                 if date.fromisoformat(r["date"]).toordinal() // bucket == last_b]
+    assert len(last_idxs) >= 2                          # open bucket has a mid-bucket point
+    rows[last_idxs[0]].update(forward_pe=None, forward_pe_loss=True, ttm_pe=None)
+    rows[-1].update(forward_pe=15.0, forward_pe_loss=False, ttm_pe=12.0)
+    out = _downsample(rows, bucket, open_end=True)
+    assert out[-1]["forward_pe"] == 15.0 and not out[-1].get("forward_pe_loss")
+    assert out[-1]["ttm_pe"] == 12.0
+    # Same data as a custom historical window (open_end=False): the right-edge loss
+    # must be kept, not exempted just for being the final bucket.
+    hist = _downsample([dict(r) for r in rows], bucket, open_end=False)
+    assert hist[-1]["forward_pe"] is None and hist[-1]["forward_pe_loss"] is True
+    assert hist[-1]["ttm_pe"] is None
+
+
+def test_api_history_keeps_loss_at_custom_historical_edge(monkeypatch):
+    # The route must only exempt the final bucket when the window reaches the latest
+    # row. A custom `end` in the past has a historical right edge: a recovered loss
+    # there stays a gap, while the live `range=all` view shows the recovery.
+    from modules.pe_monitor import config as pe_config, views
+    base = date(2022, 1, 1)
+    base_ord = base.toordinal()
+    n, end_idx = 900, 860
+    rows = [{"date": (base + timedelta(days=i)).isoformat(), "price": 100.0,
+             "forward_pe": 10.0, "forward_pe_ibes": 10.0} for i in range(n)]
+    bucket = _pick_bucket(end_idx + 1)
+    assert bucket > 1                                       # the window downsamples
+    last_b = (base_ord + end_idx) // bucket
+    fb = [i for i in range(end_idx + 1) if (base_ord + i) // bucket == last_b]
+    assert len(fb) >= 2                                     # final bucket spans >1 day
+    rows[fb[0]]["forward_pe"] = -10.0                       # forecast loss at the right edge
+    db = _mkdb(rows)
+    monkeypatch.setattr(pe_config, "load_config",
+                        lambda *a, **k: {"database_path": db, "tickers": ["T"]})
+    views._cfg.cache_clear()
+    try:
+        hist = views.api_history("T", end=rows[end_idx]["date"])
+        assert hist[-1]["date"] <= rows[end_idx]["date"]
+        assert hist[-1]["forward_pe"] is None and hist[-1]["forward_pe_loss"] is True
+        full = views.api_history("T", range_="all")
+        assert full[-1]["forward_pe"] == 10.0              # latest row profitable -> shown
+    finally:
+        views._cfg.cache_clear()
+        os.unlink(db)
+
+
+def test_api_history_exempts_live_bucket_when_latest_price_missing(monkeypatch):
+    # open_end must track the actual last row, not the last *priced* row: if the
+    # latest row's price is missing, the live bucket must still be exempt so an
+    # earlier recovered loss in it isn't drawn as an ongoing gap at today's edge.
+    from modules.pe_monitor import config as pe_config, views
+    base = date(2022, 1, 1)
+    base_ord = base.toordinal()
+    n = 900
+    rows = [{"date": (base + timedelta(days=i)).isoformat(), "price": 100.0,
+             "forward_pe": 10.0, "forward_pe_ibes": 10.0} for i in range(n)]
+    bucket = _pick_bucket(n)
+    last_b = (base_ord + n - 1) // bucket
+    fb = [i for i in range(n) if (base_ord + i) // bucket == last_b]
+    assert len(fb) >= 2
+    rows[fb[0]]["forward_pe"] = -10.0                       # forecast loss in the live bucket
+    rows[-1]["price"], rows[-1]["forward_pe"] = None, None  # latest row: price unavailable
+    db = _mkdb(rows)
+    monkeypatch.setattr(pe_config, "load_config",
+                        lambda *a, **k: {"database_path": db, "tickers": ["T"]})
+    views._cfg.cache_clear()
+    try:
+        out = views.api_history("T", range_="all")
+        assert out[-1]["date"] == rows[-1]["date"]
+        assert not out[-1].get("forward_pe_loss")          # live bucket exempt -> no spurious band
+    finally:
+        views._cfg.cache_clear()
+        os.unlink(db)

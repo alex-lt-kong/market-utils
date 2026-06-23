@@ -52,7 +52,9 @@ def _pick_bucket(num_rows: int) -> int:
     return BUCKET_DAYS[-1]
 
 
-def _downsample(rows: list[dict], bucket_days: int) -> list[dict]:
+def _downsample(rows: list[dict], bucket_days: int, open_end: bool = False) -> list[dict]:
+    """`open_end` exempts the final (live) bucket from loss collapsing, so a loss
+    that recovered by today's edge isn't drawn as an ongoing gap."""
     if bucket_days <= 1 or len(rows) <= TARGET_POINTS:
         return rows
     out = []
@@ -68,17 +70,25 @@ def _downsample(rows: list[dict], bucket_days: int) -> list[dict]:
             bucket_rows = []
         bucket_rows.append(r)
     if bucket_rows:
-        out.append(_collapse_bucket(bucket_rows))
+        out.append(_collapse_bucket(bucket_rows, is_open=open_end))
     return out
 
 
-def _collapse_bucket(bucket_rows: list[dict]) -> dict:
-    """Collapse a bucket of daily rows into one. Most fields take the last
-    (most recent) value; volume sums so the bar represents period volume."""
+def _collapse_bucket(bucket_rows: list[dict], is_open: bool = False) -> dict:
+    """Collapse daily rows to one: last value per field, volume summed. Unless
+    `is_open`, a loss anywhere in the bucket collapses that series to a gap."""
     result = dict(bucket_rows[-1])
-    vols = [r.get("volume") for r in bucket_rows]
-    vols = [v for v in vols if v is not None]
+    vols = [r.get("volume") for r in bucket_rows if r.get("volume") is not None]
     result["volume"] = sum(vols) if vols else None
+    if is_open:
+        return result
+    if any(r.get("forward_pe_loss") for r in bucket_rows):
+        result["forward_pe"], result["forward_pe_loss"] = None, True
+    if any(r.get("forward_pe_ibes_loss") for r in bucket_rows):
+        result["forward_pe_ibes"], result["forward_pe_ibes_loss"] = None, True
+    if any(r.get("ttm_pe") is None and r.get("trailing_eps") is not None
+           for r in bucket_rows):
+        result["ttm_pe"] = None  # TTM band keys off null-PE-with-trailing-EPS
     return result
 
 
@@ -367,7 +377,9 @@ def api_history(
             start_date = (date.today() - timedelta(days=days)).isoformat()
 
     rows = _history_rows(cfg["database_path"], ticker, start_date, end_date)
-    return _downsample(rows, _pick_bucket(len(rows)))
+    latest = storage.latest_value_date(cfg["database_path"], ticker, "date")
+    open_end = bool(rows) and rows[-1]["date"] == latest
+    return _downsample(rows, _pick_bucket(len(rows)), open_end)
 
 
 def _hide_nonpositive_pe(row: dict) -> dict:
