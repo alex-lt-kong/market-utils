@@ -84,6 +84,13 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   Fixed with `pinX` (afterFit `paddingRight=36`) on both → both `[58,992]`. Also added even
   round-date ticks (`niceDateTicks` + `fmtDateTick`) and cleared the review findings (2 stale
   comments, single-point-extent guard). All Playwright-verified (geometry, ticks, no errors).
+- **Loss shading** (`lossBandsPlugin`): a semi-transparent band tinted to each line over the
+  periods its P/E is undefined (a missing line otherwise reads as a glitch). TTM: client-side,
+  null P/E within trailing-EPS coverage (reaches edges; day-gaps in trailing-EPS don't
+  fragment it). Forward/IBES: a server loss flag `<col>_loss` from `_interpolate_series` — the
+  client can't tell a forecast-loss null from a no-data null at the *visible edge* (e.g. MU's
+  IBES loss starts before its first in-window positive anchor). Sub-3-week gaps dropped as
+  interp noise. Playwright-verified: INTC blue-only, MU blue+green, NIO blue+red+green.
 
 ### 2026-06-23 — Review `feat/pe-chart-enhancements`
 - Compared the fetched feature ref against `origin/main` (3 commits; 4 files).

@@ -102,10 +102,13 @@ def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list
     so the line breaks from the last profitable anchor to the next one, and the
     positive anchors on either side still plot. Days outside the [first anchor,
     last anchor] window stay None — honest empty over fake extrapolation.
-    Interpolated days get `flag_col: True`; real anchors False.
+    Interpolated days get `flag_col: True`; real anchors False. Rows a loss leaves
+    as a gap get `<value_col>_loss: True` (drives the chart's loss shading).
     """
+    loss_col = value_col + "_loss"  # True on the gap rows a forecast loss creates
     for r in rows:
         r[flag_col] = False
+        r[loss_col] = False
     # An anchor carries a real, priced P/E. `r.get(value_col)` is falsy for both
     # None and 0, so a zero P/E is skipped (its EPS would be infinite); a negative
     # P/E (forecast loss) is kept — its sign is what places the break.
@@ -117,11 +120,15 @@ def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list
     for i, eps in zip(anchors, eps_at):
         if eps <= 0:
             rows[i][value_col] = None  # loss anchor: undefined P/E, serve as a gap
+            rows[i][loss_col] = True
     for ai in range(len(anchors) - 1):
         L_i, R_i = anchors[ai], anchors[ai + 1]
         L_eps, R_eps = eps_at[ai], eps_at[ai + 1]
-        if L_eps <= 0 or R_eps <= 0:
-            continue  # a loss bounds this span -> leave a gap so the line breaks
+        if L_eps <= 0 or R_eps <= 0:  # a loss bounds this span -> gap; flag it
+            for i in range(L_i, R_i + 1):
+                if rows[i].get(value_col) is None:
+                    rows[i][loss_col] = True
+            continue
         L_ord = date.fromisoformat(rows[L_i]["date"]).toordinal()
         span = date.fromisoformat(rows[R_i]["date"]).toordinal() - L_ord
         if span <= 0:
