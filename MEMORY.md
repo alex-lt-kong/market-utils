@@ -52,9 +52,12 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   so the line breaks from last-profitable to next-profitable anchor (kills the near-zero
   +∞ interpolation spike: MU max served 115.7 vs a 2887 spike). TTM stays nulled-at-source
   (it isn't interpolated). `_hide_nonpositive_pe` enforces the rule on the latest grid.
-- Chart `dashboard.html`: `segment.borderColor` breaks a line only at *genuine* gaps (row
-  present, value null) while still bridging *alignment* gaps (ticker lacks a union date) —
-  both were `null` and `spanGaps` bridged both before.
+- Chart `dashboard.html`: a `segment.borderColor` callback breaks a line only at *genuine*
+  gaps (row present, value null) while still bridging *alignment* gaps (ticker lacks a union
+  date) — both are `null` and `spanGaps` bridged both before. NOTE: first impl had a dead
+  loop — Chart.js emits one segment per *adjacent* pair (p1DataIndex = p0DataIndex+1), so
+  scanning indices *between* the endpoints never fired and no line broke (caught visually on
+  UAT, not by tests). Fixed to test the segment's two endpoints against the genuine-gap mask.
 - An earlier "drop negatives at source + null the DB" attempt was reverted in favour of Y.
   Verified: 33 tests pass (+`test_interpolate_breaks_across_forward_loss`); MU IBES breaks
   Jul–Sep 2023; 0 negatives served across all 39 tickers; NIO → 98 positive fwd-P/E days.

@@ -558,12 +558,11 @@ function renderChart(ticker, labels) {
   // ones (row present, metric undefined) so a loss gap doesn't fake a trend.
   const genuineGap = field => aligned.map(r => r !== null && (r[field] ?? null) === null);
   const TRANSPARENT = "rgba(0,0,0,0)";
+  // Chart.js (spanGaps) emits one segment per adjacent pair, each touching the
+  // null point — so a gap-bridge segment is one whose endpoint is a genuine gap.
   const segmentBreak = mask => ({
-    borderColor: ctx => {
-      for (let k = ctx.p0DataIndex + 1; k < ctx.p1DataIndex; k++)
-        if (mask[k]) return TRANSPARENT;
-      return undefined;
-    },
+    borderColor: ctx =>
+      mask[ctx.p0DataIndex] || mask[ctx.p1DataIndex] ? TRANSPARENT : undefined,
   });
 
   const pinWidth = axis => { axis.width = Y_AXIS_WIDTH; };
