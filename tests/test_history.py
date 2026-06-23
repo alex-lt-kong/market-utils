@@ -3,7 +3,13 @@ import tempfile
 from datetime import date, timedelta
 
 from modules.pe_monitor import storage
-from modules.pe_monitor.views import _collapse_bucket, _history_rows, _interpolate_series
+from modules.pe_monitor.views import (
+    _collapse_bucket,
+    _downsample,
+    _history_rows,
+    _interpolate_series,
+    _pick_bucket,
+)
 
 
 def _mkdb(rows):
@@ -98,7 +104,7 @@ def test_interpolate_nulls_zero_pe():
 
 
 def test_collapse_bucket_preserves_loss_over_recovered_last_row():
-    # A loss earlier in a bucket must survive even when the bucket's last row has
+    # A historical bucket: a loss earlier in it must survive even when the last row
     # recovered — otherwise coarse zoom hides the break/band the daily view shows.
     bucket = [
         {"date": "2024-01-01", "forward_pe": None, "forward_pe_loss": True,
@@ -124,3 +130,42 @@ def test_collapse_bucket_keeps_last_when_no_loss():
     ]
     out = _collapse_bucket(bucket)
     assert out["forward_pe"] == 12.0 and out["ttm_pe"] == 8.0 and out["volume"] == 30
+
+
+def test_collapse_bucket_open_keeps_recovered_last_value():
+    # The open (latest) bucket drives the chart endpoint + header: a loss earlier in
+    # it that recovered by the last row must NOT null today's value to a gap/N/A.
+    bucket = [
+        {"date": "2024-01-01", "forward_pe": None, "forward_pe_loss": True,
+         "forward_pe_ibes": None, "forward_pe_ibes_loss": True,
+         "ttm_pe": None, "trailing_eps": -1.0, "volume": 10},
+        {"date": "2024-01-15", "forward_pe": 12.0, "forward_pe_loss": False,
+         "forward_pe_ibes": 11.0, "forward_pe_ibes_loss": False,
+         "ttm_pe": 8.0, "trailing_eps": 3.0, "volume": 20},
+    ]
+    out = _collapse_bucket(bucket, is_open=True)
+    assert out["forward_pe"] == 12.0 and not out["forward_pe_loss"]
+    assert out["forward_pe_ibes"] == 11.0 and not out["forward_pe_ibes_loss"]
+    assert out["ttm_pe"] == 8.0
+    assert out["volume"] == 30            # volume still sums
+
+
+def test_downsample_open_bucket_keeps_recovered_endpoint():
+    # End to end through _downsample: a loss inside the final (open) bucket whose
+    # last raw row recovered must leave the chart endpoint on the recovered value,
+    # while a historical loss bucket still collapses to a gap.
+    base = date(2022, 1, 1)
+    rows = [{"date": (base + timedelta(days=i)).isoformat(), "price": 100.0,
+             "forward_pe": 10.0, "forward_pe_loss": False,
+             "ttm_pe": 9.0, "trailing_eps": 3.0, "volume": 5} for i in range(900)]
+    bucket = _pick_bucket(len(rows))
+    assert bucket > 1                                  # downsampling actually engages
+    last_b = date.fromisoformat(rows[-1]["date"]).toordinal() // bucket
+    last_idxs = [i for i, r in enumerate(rows)
+                 if date.fromisoformat(r["date"]).toordinal() // bucket == last_b]
+    assert len(last_idxs) >= 2                          # open bucket has a mid-bucket point
+    rows[last_idxs[0]].update(forward_pe=None, forward_pe_loss=True, ttm_pe=None)
+    rows[-1].update(forward_pe=15.0, forward_pe_loss=False, ttm_pe=12.0)
+    out = _downsample(rows, bucket)
+    assert out[-1]["forward_pe"] == 15.0 and not out[-1].get("forward_pe_loss")
+    assert out[-1]["ttm_pe"] == 12.0

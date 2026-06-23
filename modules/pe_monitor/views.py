@@ -68,11 +68,11 @@ def _downsample(rows: list[dict], bucket_days: int) -> list[dict]:
             bucket_rows = []
         bucket_rows.append(r)
     if bucket_rows:
-        out.append(_collapse_bucket(bucket_rows))
+        out.append(_collapse_bucket(bucket_rows, is_open=True))
     return out
 
 
-def _collapse_bucket(bucket_rows: list[dict]) -> dict:
+def _collapse_bucket(bucket_rows: list[dict], is_open: bool = False) -> dict:
     """Collapse a bucket of daily rows into one. Most fields take the last
     (most recent) value; volume sums so the bar represents period volume.
 
@@ -80,10 +80,16 @@ def _collapse_bucket(bucket_rows: list[dict]) -> dict:
     bucket, the collapsed day is a gap for it too — otherwise a loss earlier in a
     30/90-day bucket (whose last row recovered) would vanish at coarse zoom,
     reconnecting the line and dropping its loss band. We err toward showing the
-    loss over hiding it."""
+    loss over hiding it.
+
+    The open (latest) bucket is exempt: its collapsed point is the chart endpoint
+    and header source, so it must mirror the last raw observation — a loss earlier
+    in it that has since recovered must not null today's value to N/A."""
     result = dict(bucket_rows[-1])
     vols = [r.get("volume") for r in bucket_rows if r.get("volume") is not None]
     result["volume"] = sum(vols) if vols else None
+    if is_open:
+        return result
     if any(r.get("forward_pe_loss") for r in bucket_rows):
         result["forward_pe"], result["forward_pe_loss"] = None, True
     if any(r.get("forward_pe_ibes_loss") for r in bucket_rows):
