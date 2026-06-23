@@ -52,7 +52,11 @@ def _pick_bucket(num_rows: int) -> int:
     return BUCKET_DAYS[-1]
 
 
-def _downsample(rows: list[dict], bucket_days: int) -> list[dict]:
+def _downsample(rows: list[dict], bucket_days: int, open_end: bool = True) -> list[dict]:
+    """`open_end` is True only when `rows` runs up to the ticker's latest stored
+    row; the final bucket is then the live/open bucket and skips loss collapsing.
+    A custom window ending in the past has a historical final bucket, so its loss
+    gaps/bands must be kept like any other."""
     if bucket_days <= 1 or len(rows) <= TARGET_POINTS:
         return rows
     out = []
@@ -68,7 +72,7 @@ def _downsample(rows: list[dict], bucket_days: int) -> list[dict]:
             bucket_rows = []
         bucket_rows.append(r)
     if bucket_rows:
-        out.append(_collapse_bucket(bucket_rows, is_open=True))
+        out.append(_collapse_bucket(bucket_rows, is_open=open_end))
     return out
 
 
@@ -82,9 +86,10 @@ def _collapse_bucket(bucket_rows: list[dict], is_open: bool = False) -> dict:
     reconnecting the line and dropping its loss band. We err toward showing the
     loss over hiding it.
 
-    The open (latest) bucket is exempt: its collapsed point is the chart endpoint
-    and header source, so it must mirror the last raw observation — a loss earlier
-    in it that has since recovered must not null today's value to N/A."""
+    The live/open bucket (when the window ends at the latest row) is exempt: its
+    collapsed point is the chart endpoint and header source, so it must mirror the
+    last raw observation — a loss earlier in it that has since recovered must not
+    null today's value to N/A. A historical final bucket is not exempt."""
     result = dict(bucket_rows[-1])
     vols = [r.get("volume") for r in bucket_rows if r.get("volume") is not None]
     result["volume"] = sum(vols) if vols else None
@@ -385,7 +390,9 @@ def api_history(
             start_date = (date.today() - timedelta(days=days)).isoformat()
 
     rows = _history_rows(cfg["database_path"], ticker, start_date, end_date)
-    return _downsample(rows, _pick_bucket(len(rows)))
+    latest = storage.latest_value_date(cfg["database_path"], ticker, "price")
+    open_end = bool(rows) and rows[-1]["date"] == latest
+    return _downsample(rows, _pick_bucket(len(rows)), open_end)
 
 
 def _hide_nonpositive_pe(row: dict) -> dict:

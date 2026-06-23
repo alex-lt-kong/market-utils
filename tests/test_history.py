@@ -166,6 +166,42 @@ def test_downsample_open_bucket_keeps_recovered_endpoint():
     assert len(last_idxs) >= 2                          # open bucket has a mid-bucket point
     rows[last_idxs[0]].update(forward_pe=None, forward_pe_loss=True, ttm_pe=None)
     rows[-1].update(forward_pe=15.0, forward_pe_loss=False, ttm_pe=12.0)
-    out = _downsample(rows, bucket)
+    out = _downsample(rows, bucket, open_end=True)
     assert out[-1]["forward_pe"] == 15.0 and not out[-1].get("forward_pe_loss")
     assert out[-1]["ttm_pe"] == 12.0
+    # Same data as a custom historical window (open_end=False): the right-edge loss
+    # must be kept, not exempted just for being the final bucket.
+    hist = _downsample([dict(r) for r in rows], bucket, open_end=False)
+    assert hist[-1]["forward_pe"] is None and hist[-1]["forward_pe_loss"] is True
+    assert hist[-1]["ttm_pe"] is None
+
+
+def test_api_history_keeps_loss_at_custom_historical_edge(monkeypatch):
+    # The route must only exempt the final bucket when the window reaches the latest
+    # row. A custom `end` in the past has a historical right edge: a recovered loss
+    # there stays a gap, while the live `range=all` view shows the recovery.
+    from modules.pe_monitor import config as pe_config, views
+    base = date(2022, 1, 1)
+    base_ord = base.toordinal()
+    n, end_idx = 900, 860
+    rows = [{"date": (base + timedelta(days=i)).isoformat(), "price": 100.0,
+             "forward_pe": 10.0, "forward_pe_ibes": 10.0} for i in range(n)]
+    bucket = _pick_bucket(end_idx + 1)
+    assert bucket > 1                                       # the window downsamples
+    last_b = (base_ord + end_idx) // bucket
+    fb = [i for i in range(end_idx + 1) if (base_ord + i) // bucket == last_b]
+    assert len(fb) >= 2                                     # final bucket spans >1 day
+    rows[fb[0]]["forward_pe"] = -10.0                       # forecast loss at the right edge
+    db = _mkdb(rows)
+    monkeypatch.setattr(pe_config, "load_config",
+                        lambda *a, **k: {"database_path": db, "tickers": ["T"]})
+    views._cfg.cache_clear()
+    try:
+        hist = views.api_history("T", end=rows[end_idx]["date"])
+        assert hist[-1]["date"] <= rows[end_idx]["date"]
+        assert hist[-1]["forward_pe"] is None and hist[-1]["forward_pe_loss"] is True
+        full = views.api_history("T", range_="all")
+        assert full[-1]["forward_pe"] == 10.0              # latest row profitable -> shown
+    finally:
+        views._cfg.cache_clear()
+        os.unlink(db)
