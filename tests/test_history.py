@@ -205,3 +205,32 @@ def test_api_history_keeps_loss_at_custom_historical_edge(monkeypatch):
     finally:
         views._cfg.cache_clear()
         os.unlink(db)
+
+
+def test_api_history_exempts_live_bucket_when_latest_price_missing(monkeypatch):
+    # open_end must track the actual last row, not the last *priced* row: if the
+    # latest row's price is missing, the live bucket must still be exempt so an
+    # earlier recovered loss in it isn't drawn as an ongoing gap at today's edge.
+    from modules.pe_monitor import config as pe_config, views
+    base = date(2022, 1, 1)
+    base_ord = base.toordinal()
+    n = 900
+    rows = [{"date": (base + timedelta(days=i)).isoformat(), "price": 100.0,
+             "forward_pe": 10.0, "forward_pe_ibes": 10.0} for i in range(n)]
+    bucket = _pick_bucket(n)
+    last_b = (base_ord + n - 1) // bucket
+    fb = [i for i in range(n) if (base_ord + i) // bucket == last_b]
+    assert len(fb) >= 2
+    rows[fb[0]]["forward_pe"] = -10.0                       # forecast loss in the live bucket
+    rows[-1]["price"], rows[-1]["forward_pe"] = None, None  # latest row: price unavailable
+    db = _mkdb(rows)
+    monkeypatch.setattr(pe_config, "load_config",
+                        lambda *a, **k: {"database_path": db, "tickers": ["T"]})
+    views._cfg.cache_clear()
+    try:
+        out = views.api_history("T", range_="all")
+        assert out[-1]["date"] == rows[-1]["date"]
+        assert not out[-1].get("forward_pe_loss")          # live bucket exempt -> no spurious band
+    finally:
+        views._cfg.cache_clear()
+        os.unlink(db)

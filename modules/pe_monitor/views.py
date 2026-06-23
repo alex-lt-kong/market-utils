@@ -52,11 +52,9 @@ def _pick_bucket(num_rows: int) -> int:
     return BUCKET_DAYS[-1]
 
 
-def _downsample(rows: list[dict], bucket_days: int, open_end: bool = True) -> list[dict]:
-    """`open_end` is True only when `rows` runs up to the ticker's latest stored
-    row; the final bucket is then the live/open bucket and skips loss collapsing.
-    A custom window ending in the past has a historical final bucket, so its loss
-    gaps/bands must be kept like any other."""
+def _downsample(rows: list[dict], bucket_days: int, open_end: bool = False) -> list[dict]:
+    """`open_end` exempts the final (live) bucket from loss collapsing, so a loss
+    that recovered by today's edge isn't drawn as an ongoing gap."""
     if bucket_days <= 1 or len(rows) <= TARGET_POINTS:
         return rows
     out = []
@@ -77,19 +75,8 @@ def _downsample(rows: list[dict], bucket_days: int, open_end: bool = True) -> li
 
 
 def _collapse_bucket(bucket_rows: list[dict], is_open: bool = False) -> dict:
-    """Collapse a bucket of daily rows into one. Most fields take the last
-    (most recent) value; volume sums so the bar represents period volume.
-
-    Gap-aware: if a series is in a forecast loss / undefined *anywhere* in the
-    bucket, the collapsed day is a gap for it too — otherwise a loss earlier in a
-    30/90-day bucket (whose last row recovered) would vanish at coarse zoom,
-    reconnecting the line and dropping its loss band. We err toward showing the
-    loss over hiding it.
-
-    The live/open bucket (when the window ends at the latest row) is exempt: its
-    collapsed point is the chart endpoint and header source, so it must mirror the
-    last raw observation — a loss earlier in it that has since recovered must not
-    null today's value to N/A. A historical final bucket is not exempt."""
+    """Collapse daily rows to one: last value per field, volume summed. Unless
+    `is_open`, a loss anywhere in the bucket collapses that series to a gap."""
     result = dict(bucket_rows[-1])
     vols = [r.get("volume") for r in bucket_rows if r.get("volume") is not None]
     result["volume"] = sum(vols) if vols else None
@@ -390,7 +377,7 @@ def api_history(
             start_date = (date.today() - timedelta(days=days)).isoformat()
 
     rows = _history_rows(cfg["database_path"], ticker, start_date, end_date)
-    latest = storage.latest_value_date(cfg["database_path"], ticker, "price")
+    latest = storage.latest_value_date(cfg["database_path"], ticker, "date")
     open_end = bool(rows) and rows[-1]["date"] == latest
     return _downsample(rows, _pick_bucket(len(rows)), open_end)
 
