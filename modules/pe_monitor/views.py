@@ -74,11 +74,23 @@ def _downsample(rows: list[dict], bucket_days: int) -> list[dict]:
 
 def _collapse_bucket(bucket_rows: list[dict]) -> dict:
     """Collapse a bucket of daily rows into one. Most fields take the last
-    (most recent) value; volume sums so the bar represents period volume."""
+    (most recent) value; volume sums so the bar represents period volume.
+
+    Gap-aware: if a series is in a forecast loss / undefined *anywhere* in the
+    bucket, the collapsed day is a gap for it too — otherwise a loss earlier in a
+    30/90-day bucket (whose last row recovered) would vanish at coarse zoom,
+    reconnecting the line and dropping its loss band. We err toward showing the
+    loss over hiding it."""
     result = dict(bucket_rows[-1])
-    vols = [r.get("volume") for r in bucket_rows]
-    vols = [v for v in vols if v is not None]
+    vols = [r.get("volume") for r in bucket_rows if r.get("volume") is not None]
     result["volume"] = sum(vols) if vols else None
+    if any(r.get("forward_pe_loss") for r in bucket_rows):
+        result["forward_pe"], result["forward_pe_loss"] = None, True
+    if any(r.get("forward_pe_ibes_loss") for r in bucket_rows):
+        result["forward_pe_ibes"], result["forward_pe_ibes_loss"] = None, True
+    if any(r.get("ttm_pe") is None and r.get("trailing_eps") is not None
+           for r in bucket_rows):
+        result["ttm_pe"] = None  # TTM band keys off null-PE-with-trailing-EPS
     return result
 
 

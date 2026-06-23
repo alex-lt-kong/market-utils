@@ -3,7 +3,7 @@ import tempfile
 from datetime import date, timedelta
 
 from modules.pe_monitor import storage
-from modules.pe_monitor.views import _history_rows, _interpolate_series
+from modules.pe_monitor.views import _collapse_bucket, _history_rows, _interpolate_series
 
 
 def _mkdb(rows):
@@ -95,3 +95,32 @@ def test_interpolate_nulls_zero_pe():
           for r in _interpolate_series([dict(r) for r in rows], "forward_pe", "f_i")}
     assert by["2026-01-01"] is None     # zero nulled, not plotted at y:0
     assert by["2026-02-01"] == 10.0
+
+
+def test_collapse_bucket_preserves_loss_over_recovered_last_row():
+    # A loss earlier in a bucket must survive even when the bucket's last row has
+    # recovered — otherwise coarse zoom hides the break/band the daily view shows.
+    bucket = [
+        {"date": "2024-01-01", "forward_pe": None, "forward_pe_loss": True,
+         "forward_pe_ibes": None, "forward_pe_ibes_loss": True,
+         "ttm_pe": None, "trailing_eps": -1.0, "volume": 10},
+        {"date": "2024-01-15", "forward_pe": 12.0, "forward_pe_loss": False,
+         "forward_pe_ibes": 11.0, "forward_pe_ibes_loss": False,
+         "ttm_pe": 8.0, "trailing_eps": 3.0, "volume": 20},
+    ]
+    out = _collapse_bucket(bucket)
+    assert out["forward_pe"] is None and out["forward_pe_loss"] is True
+    assert out["forward_pe_ibes"] is None and out["forward_pe_ibes_loss"] is True
+    assert out["ttm_pe"] is None          # TTM loss preserved despite recovered last row
+    assert out["volume"] == 30            # volume still sums
+
+
+def test_collapse_bucket_keeps_last_when_no_loss():
+    bucket = [
+        {"date": "2024-01-01", "forward_pe": 10.0, "forward_pe_loss": False,
+         "ttm_pe": 9.0, "trailing_eps": 3.0, "volume": 10},
+        {"date": "2024-01-15", "forward_pe": 12.0, "forward_pe_loss": False,
+         "ttm_pe": 8.0, "trailing_eps": 3.0, "volume": 20},
+    ]
+    out = _collapse_bucket(bucket)
+    assert out["forward_pe"] == 12.0 and out["ttm_pe"] == 8.0 and out["volume"] == 30
