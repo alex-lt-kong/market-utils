@@ -2,16 +2,18 @@
 
 ## Active Status
 
-**Objective:** Gambler's Toolbox (GitHub `alex-lt-kong/gamblers-toolbox`) is a single
-FastAPI app (`core/`) that auto-discovers plugin modules under `modules/` behind one
-landing page, one port, and one shared auth layer. A review (see log) raised five bugs
-+ refactors; #1, #5, and the `_parse_iso_date` bug are now fixed.
+**Objective:** pe_monitor now handles money-losing companies correctly — forward-P/E
+lines (live red + IBES green) **break** across forecast-loss windows instead of
+bridging them or plotting a negative P/E. Done on branch `fix/pe-chart-gaps-and-ibes-neg`
+(cut off `feat/pe-chart-enhancements`). Key invariant: forward-P/E columns store the raw
+*signed* ratio; the "non-positive ⇒ undefined" rule lives at serve time
+(`_interpolate_series` for charts/delta, `_hide_nonpositive_pe` for the latest grid).
 
-**Immediate next steps (remaining review items):** bound AI-ratios Yahoo work with
-per-call network timeouts (executor deadline can't kill running threads); token-in-URL
-is by-design (shareable links) — only revisit if you want POST/Authorization; small
-refactors left: port/slug validation, scope `latest_per_ticker` to requested tickers,
-widen `ibes.*.csv` gitignore pattern to also catch `.csv.zip`.
+**Immediate next steps:** Visual-verify the breaks (MU IBES Jul–Sep 2023; NIO mostly
+broken) then open a PR. Still open from the `feat/pe-chart-enhancements` review: guard
+chart history against stale responses, and fetch a pre-window anchor before interpolating
+custom ranges. The DB backup `modules/pe_monitor/pe_history.db.bak-d9866cf` can be deleted
+once merged.
 
 - `core/` — host shell: `module.py` (interface), `registry.py` (discovery), `auth.py`
   (token→cookie gate), typed `config.py` (Pydantic `HostConfig`), `main.py`
@@ -38,6 +40,34 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 - Tests: `pip install -r requirements-dev.txt && python -m pytest` (21 integration tests).
 
 ## Activity Log
+
+### 2026-06-23 — Forward-P/E money-losing handling (Design Y, branch `fix/pe-chart-gaps-and-ibes-neg`)
+- Problem: a company forecast to lose money has negative forward EPS ⇒ forward P/E is
+  undefined. Three write-sites stored a *negative* P/E (live `fetcher` via Yahoo
+  `forwardPE`; `import_wayback_fwdpe`; `import_ibes` PRICE/MEANEST) that plotted below
+  zero, and `_interpolate_series` *bridged* the loss gaps, faking a smooth trend.
+- Design Y — store signed, break at serve: forward-P/E columns keep the raw *signed* ratio
+  (negative = forecast loss); no source guards, no schema change. `_interpolate_series`
+  reworked in EPS-space — nulls loss anchors and never interpolates a span a loss bounds,
+  so the line breaks from last-profitable to next-profitable anchor (kills the near-zero
+  +∞ interpolation spike: MU max served 115.7 vs a 2887 spike). TTM stays nulled-at-source
+  (it isn't interpolated). `_hide_nonpositive_pe` enforces the rule on the latest grid.
+- Chart `dashboard.html`: `segment.borderColor` breaks a line only at *genuine* gaps (row
+  present, value null) while still bridging *alignment* gaps (ticker lacks a union date) —
+  both were `null` and `spanGaps` bridged both before.
+- An earlier "drop negatives at source + null the DB" attempt was reverted in favour of Y.
+  Verified: 33 tests pass (+`test_interpolate_breaks_across_forward_loss`); MU IBES breaks
+  Jul–Sep 2023; 0 negatives served across all 39 tickers; NIO → 98 positive fwd-P/E days.
+  Pre-restore DB backup `pe_history.db.bak-d9866cf` deletable after merge.
+
+### 2026-06-23 — Review `feat/pe-chart-enhancements`
+- Compared the fetched feature ref against `origin/main` (3 commits; 4 files).
+- Found overlapping history requests can populate/render the cache with an obsolete
+  range after the user has selected a newer range.
+- Found history is clipped to a custom start before interpolation, so a window starting
+  inside a sparse forward-P/E gap loses values until the next in-window anchor.
+- Refactoring opportunities: share the duplicated column chooser and replace the
+  categorical union-date axis with a true time axis.
 
 ### 2026-06-22 — Review fixes on `feat/delta-fwd-pe` (sort, config hardening, delta perf)
 - Reviewed the whole project; fixed four items, each its own commit:
@@ -83,24 +113,5 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 - #2: pinned requirements to the tested set (compatible-release `~=`), incl. starlette.
   Stayed on `httpx` for TestClient (the deprecation points at an unverified `httpx2`
   package — sandbox flagged it as supply-chain risk); silenced the warning in `pytest.ini`.
-
-### 2026-06-22 — Review unified FastAPI branch
-- Reviewed the complete `main...origin/feat/unified-fastapi-landing` diff; the
-  19-test suite hangs on its first request with the currently resolved unbounded
-  FastAPI/Starlette/httpx dependency set.
-- Found scheduler-disabled replicas skip P/E database initialization/migrations;
-  global scheduler ownership makes app lifespans non-reentrant.
-- Found AI-ratios timeout leaves running worker threads behind and URL query-token
-  authentication exposes bearer secrets to normal request logging.
-- Noted strict config/date validation and stale module-example docs as cleanup work.
-
-### 2026-06-22 — Rename project to Gambler's Toolbox
-- Renamed branding to **Gambler's Toolbox** / slug `gamblers-toolbox`: FastAPI title,
-  landing page, manifest, icon, README, config comments, log banner prefix.
-- Renamed env vars `MARKET_UTILS_CONFIG`→`GAMBLERS_TOOLBOX_CONFIG`,
-  `MARKET_UTILS_LOG_SECRETS`→`GAMBLERS_TOOLBOX_LOG_SECRETS` (breaking for external
-  launchers; update systemd/launch scripts). Tests updated to match.
-- GitHub repo renamed `market-monitors`→`gamblers-toolbox`; updated the `origin` URL.
-- Left the local working dir name and a stale notebook path string as-is.
 
 _(Older entries moved to `MEMORY_ARCHIVE.md`.)_

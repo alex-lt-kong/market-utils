@@ -83,43 +83,47 @@ def _collapse_bucket(bucket_rows: list[dict]) -> dict:
 
 
 def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list[dict]:
-    """Fill NULL `value_col` (a forward-P/E series) between two real anchors by
-    interpolating implied forward EPS, then deriving the P/E from each day's
-    actual price.
+    """Reconstruct a daily forward-P/E line from sparse, signed anchors, breaking
+    it wherever the implied forward EPS is non-positive (a forecast loss leaves
+    the P/E undefined).
 
-    Why this works: at any anchor date d we know both Price(d) and PE(d) from
-    real data, so ForwardEPS(d) = Price(d) / PE(d) is determined. Between
-    earnings reports, analyst consensus EPS moves slowly (typically 1-3% per
-    quarter), so a linear blend of EPS between anchors is a much better
-    assumption than a linear blend of PE itself — the latter would ignore the
-    daily price movements that drive most fwd-P/E variance between earnings.
+    Why EPS space: at any anchor date d we know Price(d) and the (signed) P/E(d)
+    from real data, so ForwardEPS(d) = Price(d) / PE(d) is determined. Between
+    earnings reports analyst consensus EPS moves slowly, so a linear blend of EPS
+    between anchors — re-derived to P/E off each day's actual price — tracks the
+    daily price moves that drive most fwd-P/E variance, which a linear blend of
+    PE itself would ignore. This is also what lets the monthly IBES anchors (each
+    a dimensionless PRICE/MEANEST) ride the daily yfinance price: currency and
+    split factors cancel because only the price *ratio* matters.
 
-    This is also what makes the IBES line work from monthly anchors: each
-    anchor stores a dimensionless IBES P/E (PRICE/MEANEST), and the daily
-    yfinance price supplies the between-anchor motion — currency and split
-    factors cancel because only the price *ratio* matters here.
-
-    Each gap row gets `flag_col: True`; real rows get False. Days outside the
-    [first anchor, last anchor] window stay NULL — better honest empty than
-    fake-confident extrapolation off the edges.
+    A loss shows up as EPS <= 0 at a real anchor (negative stored P/E). We null
+    that anchor and never interpolate a span that a loss bounds — the P/E is
+    unstable through the whole neighborhood of EPS=0, not just at the crossing —
+    so the line breaks from the last profitable anchor to the next one, and the
+    positive anchors on either side still plot. Days outside the [first anchor,
+    last anchor] window stay None — honest empty over fake extrapolation.
+    Interpolated days get `flag_col: True`; real anchors False.
     """
     for r in rows:
         r[flag_col] = False
+    # An anchor carries a real, priced P/E. `r.get(value_col)` is falsy for both
+    # None and 0, so a zero P/E is skipped (its EPS would be infinite); a negative
+    # P/E (forecast loss) is kept — its sign is what places the break.
     anchors = [
         i for i, r in enumerate(rows)
-        if r.get(value_col) is not None and r.get("price")
+        if r.get(value_col) and r.get("price")
     ]
-    if len(anchors) < 2:
-        return rows
+    eps_at = [rows[i]["price"] / rows[i][value_col] for i in anchors]
+    for i, eps in zip(anchors, eps_at):
+        if eps <= 0:
+            rows[i][value_col] = None  # loss anchor: undefined P/E, serve as a gap
     for ai in range(len(anchors) - 1):
         L_i, R_i = anchors[ai], anchors[ai + 1]
-        if R_i == L_i + 1:
-            continue
-        L, R = rows[L_i], rows[R_i]
-        L_eps = L["price"] / L[value_col]
-        R_eps = R["price"] / R[value_col]
-        L_ord = date.fromisoformat(L["date"]).toordinal()
-        span = date.fromisoformat(R["date"]).toordinal() - L_ord
+        L_eps, R_eps = eps_at[ai], eps_at[ai + 1]
+        if L_eps <= 0 or R_eps <= 0:
+            continue  # a loss bounds this span -> leave a gap so the line breaks
+        L_ord = date.fromisoformat(rows[L_i]["date"]).toordinal()
+        span = date.fromisoformat(rows[R_i]["date"]).toordinal() - L_ord
         if span <= 0:
             continue
         for i in range(L_i + 1, R_i):
@@ -127,10 +131,7 @@ def _interpolate_series(rows: list[dict], value_col: str, flag_col: str) -> list
             if not row.get("price"):
                 continue
             t = (date.fromisoformat(row["date"]).toordinal() - L_ord) / span
-            eps = L_eps + t * (R_eps - L_eps)
-            if eps <= 0:
-                continue  # EPS sign change — linear blend isn't meaningful
-            row[value_col] = row["price"] / eps
+            row[value_col] = row["price"] / (L_eps + t * (R_eps - L_eps))
             row[flag_col] = True
     return rows
 
@@ -350,10 +351,21 @@ def api_history(
     return _downsample(rows, _pick_bucket(len(rows)))
 
 
+def _hide_nonpositive_pe(row: dict) -> dict:
+    """A P/E is a meaningful multiple only when positive; a non-positive value (a
+    trailing or forecast loss) reads as undefined. The chart enforces this via
+    interpolation; the latest-snapshot grid enforces it here."""
+    for c in ("ttm_pe", "forward_pe", "forward_pe_ibes"):
+        if row.get(c) is not None and row[c] <= 0:
+            row[c] = None
+    return row
+
+
 @router.get("/api/latest")
 def api_latest():
     cfg = _cfg()
-    return storage.latest_per_ticker(cfg["database_path"], cfg["tickers"])
+    rows = storage.latest_per_ticker(cfg["database_path"], cfg["tickers"])
+    return [_hide_nonpositive_pe(r) for r in rows]
 
 
 @router.post("/api/refresh")

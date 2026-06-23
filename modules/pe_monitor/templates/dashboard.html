@@ -554,6 +554,18 @@ function renderChart(ticker, labels) {
   const col = field => aligned.map(r => (r ? r[field] ?? null : null));
   const flagRadius = (field, on) => aligned.map(r => (r && r[field] ? 0 : on));
 
+  // Bridge alignment nulls (ticker lacks a date another has) but break genuine
+  // ones (row present, metric undefined) so a loss gap doesn't fake a trend.
+  const genuineGap = field => aligned.map(r => r !== null && (r[field] ?? null) === null);
+  const TRANSPARENT = "rgba(0,0,0,0)";
+  const segmentBreak = mask => ({
+    borderColor: ctx => {
+      for (let k = ctx.p0DataIndex + 1; k < ctx.p1DataIndex; k++)
+        if (mask[k]) return TRANSPARENT;
+      return undefined;
+    },
+  });
+
   const pinWidth = axis => { axis.width = Y_AXIS_WIDTH; };
   const lineStyle = {tension: 0.2, spanGaps: true, borderWidth: 1.5, pointRadius: 1.5, pointHoverRadius: 4};
 
@@ -575,11 +587,14 @@ function renderChart(ticker, labels) {
     data: {
       labels,
       datasets: [
-        {label: "TTM P/E", data: col("ttm_pe"), borderColor: "#0d6efd", backgroundColor: "#0d6efd", ...lineStyle},
+        {label: "TTM P/E", data: col("ttm_pe"), borderColor: "#0d6efd", backgroundColor: "#0d6efd", ...lineStyle,
+         segment: segmentBreak(genuineGap("ttm_pe"))},
         {label: "Forward P/E", data: col("forward_pe"), borderColor: "#dc3545", backgroundColor: "#dc3545", ...lineStyle,
-         pointRadius: fwdPeInterpRadius, pointHoverRadius: fwdPeInterpHover},
+         pointRadius: fwdPeInterpRadius, pointHoverRadius: fwdPeInterpHover,
+         segment: segmentBreak(genuineGap("forward_pe"))},
         {label: "Forward P/E (IBES)", data: col("forward_pe_ibes"), borderColor: "#198754", backgroundColor: "#198754", ...lineStyle,
-         borderDash: [5, 3], pointRadius: ibesInterpRadius, pointHoverRadius: ibesInterpHover},
+         borderDash: [5, 3], pointRadius: ibesInterpRadius, pointHoverRadius: ibesInterpHover,
+         segment: segmentBreak(genuineGap("forward_pe_ibes"))},
       ],
     },
     options: {
