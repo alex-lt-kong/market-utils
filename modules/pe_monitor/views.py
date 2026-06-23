@@ -220,6 +220,8 @@ def _delta_point(rows: list[dict], days: int | None, ytd: bool) -> dict:
              "price_contrib": None, "eps_contrib": None}
     if not pts:
         return empty
+    if rows[-1].get("forward_pe_loss"):  # latest fwd P/E is a forecast loss -> now is N/A,
+        return {**empty, "now_date": rows[-1]["date"]}  # not the last pre-loss value
     now_date, now_val, now_interp, now_price = pts[-1]
     target = _window_target(now_date, days, ytd)
     then = next((p for p in reversed(pts) if p[0] <= target), None)

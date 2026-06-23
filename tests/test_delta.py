@@ -50,6 +50,18 @@ def test_delta_empty_series():
     assert d["now"] is None and d["then"] is None and d["delta_pct"] is None
 
 
+def test_delta_now_none_when_latest_is_a_forecast_loss():
+    # Latest forward P/E is a loss (negative) -> interpolation nulls it -> `now` must be
+    # N/A, not the stale pre-loss positive value.
+    rows = [
+        {"date": "2026-01-01", "price": 100.0, "forward_pe": 10.0},
+        {"date": "2026-02-15", "price": 50.0, "forward_pe": -20.0},  # forecast loss = now
+    ]
+    d = _delta_point([dict(r) for r in rows], days=30, ytd=False)
+    assert d["now"] is None and d["now_date"] == "2026-02-15"
+    assert d["then"] is None and d["delta"] is None and d["delta_pct"] is None
+
+
 def test_api_delta_shape_and_window_fallback(make_app):
     c = TestClient(make_app())
     rows = c.get("/pe-monitor/api/delta?window=3m").json()
