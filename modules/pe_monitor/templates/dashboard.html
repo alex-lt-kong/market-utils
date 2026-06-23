@@ -543,7 +543,9 @@ function renderChart(ticker, xMin, xMax) {
 
   const pinWidth = axis => { axis.width = Y_AXIS_WIDTH; };
   const lineStyle = {tension: 0.2, spanGaps: false, borderWidth: 1.5, pointRadius: 1.5, pointHoverRadius: 4};
-  const xAxis = extra => ({type: "linear", min: xMin, max: xMax, ...extra});
+  // offset:false on both charts (bar defaults to true) so a date maps to the same
+  // pixel in the line and volume charts — otherwise they drift out of alignment.
+  const xAxis = extra => ({type: "linear", offset: false, min: xMin, max: xMax, ...extra});
   const dateTitle = items => (items.length ? fmtDateAxis(items[0].parsed.x) : "");
 
   const peChart = new Chart(peCtx, {

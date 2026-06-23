@@ -66,8 +66,11 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   — equal calendar spans rendered at unequal width (INTC 1986→ at 30d buckets vs ARM daily ⇒
   recent years ~15× wider). This deletes `unionDates`/`alignRows`/`col`/`genuineGap`, so
   `segmentBreak` is gone too — replaced by plain `spanGaps:false` (one ticker per chart ⇒
-  every null is a genuine gap). `cutoffLine` maps date→pixel via the scale. NOT yet
-  browser-verified here (no headless render); Python tests only confirm the template renders.
+  every null is a genuine gap). `cutoffLine` maps date→pixel via the scale.
+- Verified the axis math via **headless Chart.js** (node + stubbed canvas): line/bar data map
+  to exact axis pixels. Caught+fixed there: bar charts default `offset:true`, insetting the
+  volume bars to ~83% of the width while the lines use the full axis (looked like vol not
+  matching the lines / data "squished") — forced `offset:false` on both x-axes.
 
 ### 2026-06-23 — Review `feat/pe-chart-enhancements`
 - Compared the fetched feature ref against `origin/main` (3 commits; 4 files).
