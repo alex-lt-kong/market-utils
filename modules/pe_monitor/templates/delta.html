@@ -184,6 +184,14 @@ const COLUMN_DEFS = [
    cellRenderer: p => sparkline(p.data.series, p.data.delta)},
 ];
 
+// Filters: a number filter (supports < / > / range, e.g. Fwd P/E < 20) on value
+// columns, a text filter on ids; the sparkline column isn't filterable.
+COLUMN_DEFS.forEach(c => {
+  c.filter = c.field === "series" ? false
+           : c.type === "numericColumn" ? "agNumberColumnFilter"
+           : "agTextColumnFilter";
+});
+
 let gridApi;
 let gridPrefs;  // shared column visibility/width persistence (grid-prefs.js)
 function ensureGrid() {
@@ -201,7 +209,7 @@ function ensureGrid() {
     }),
     columnDefs: COLUMN_DEFS,
     rowData: [],
-    defaultColDef: {resizable: true, sortable: true},
+    defaultColDef: {resizable: true, sortable: true, floatingFilter: true},
     getRowId: ({data}) => data.ticker,
     onColumnResized: e => gridPrefs && gridPrefs.onColumnResized(e),
   });

@@ -100,6 +100,13 @@ canvas{width:100%!important;height:100%!important}
 }
 .range-btn:hover{background:var(--surface);color:var(--ink)}
 .range-btn.active{background:var(--accent);color:#000;border-color:var(--accent)}
+.series-legend{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:.3rem 0 .6rem}
+.series-chip{display:inline-flex;align-items:center;gap:6px;cursor:pointer;user-select:none;
+  font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--ink);
+  border:1px solid var(--border);padding:2px 8px}
+.series-chip .swatch{width:14px;height:3px;display:inline-block}
+.series-chip:hover{border-color:var(--border-strong)}
+.series-chip.off{opacity:.45;text-decoration:line-through}
 .chart-controls{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
 .date-range{display:flex;align-items:center;gap:.3rem}
 .date-range input[type=date]{
@@ -188,6 +195,7 @@ canvas{width:100%!important;height:100%!important}
       </div>
     </div>
   </div>
+  <div class="series-legend" id="series-legend"></div>
   <p id="history-placeholder" class="empty">Check one or more tickers above to view their historical chart.</p>
   {% for t in tickers %}
   <div class="chart-card" id="chart-card-{{ t }}" style="display:none">
@@ -350,6 +358,35 @@ const visibleCharts = new Set();
 // (which rebuilds the charts) doesn't resurrect a hidden line.
 const hiddenSeries = new Set(JSON.parse(localStorage.getItem("pe-hidden-series") || "[]"));
 function saveHidden() { localStorage.setItem("pe-hidden-series", JSON.stringify([...hiddenSeries])); }
+
+// One shared legend for every per-ticker chart (small multiples). Colors mirror
+// the line datasets; clicking a chip toggles that series across all charts.
+const PE_SERIES = [
+  {label: "TTM P/E", color: "#ff9e1b"},
+  {label: "Forward P/E", color: "#ff5252"},
+  {label: "Forward P/E (IBES)", color: "#2ecc71"},
+];
+function renderSeriesLegend() {
+  const el = document.getElementById("series-legend");
+  if (!el) return;
+  el.innerHTML = "";
+  for (const s of PE_SERIES) {
+    const chip = document.createElement("span");
+    chip.className = "series-chip" + (hiddenSeries.has(s.label) ? " off" : "");
+    chip.innerHTML = `<span class="swatch" style="background:${s.color}"></span>${s.label}`;
+    chip.onclick = () => toggleSeries(s.label);
+    el.appendChild(chip);
+  }
+}
+function toggleSeries(label) {
+  if (hiddenSeries.has(label)) hiddenSeries.delete(label); else hiddenSeries.add(label);
+  saveHidden();
+  for (const inst of chartInstances.values()) {
+    const i = inst.pe.data.datasets.findIndex(d => d.label === label);
+    if (i >= 0) { inst.pe.setDatasetVisibility(i, !hiddenSeries.has(label)); inst.pe.update(); }
+  }
+  renderSeriesLegend();
+}
 const chartInstances = new Map();
 const historyRows = new Map();   // ticker -> fetched rows for the current range
 
@@ -718,13 +755,7 @@ function renderChart(ticker, xMin, xMax) {
         x: xAxis({ticks: {display: false}, grid: {display: false}}),
       },
       plugins: {
-        legend: {onClick(e, item, legend) {
-          const ci = legend.chart, vis = ci.isDatasetVisible(item.datasetIndex);
-          ci.setDatasetVisibility(item.datasetIndex, !vis);
-          if (vis) hiddenSeries.add(item.text); else hiddenSeries.delete(item.text);
-          saveHidden();
-          ci.update();
-        }},
+        legend: {display: false},   // replaced by the shared #series-legend
         lossBands: {bands: lossBandList},
         tooltip: {callbacks: {title: dateTitle}},
         cutoffLine: {date: FIRST_LIVE_DATE},
@@ -852,6 +883,7 @@ function initPanelSplitter() {
     el.addEventListener("change", onDateChange);
   }
   restorePeriod();
+  renderSeriesLegend();
   initPanelSplitter();
   updateHistoryPlaceholder();
   await loadSnapshot();

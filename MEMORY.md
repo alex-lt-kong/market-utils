@@ -76,6 +76,11 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   persist via localStorage (`pe-hidden-series`, `pe-range`) — a hidden line survives a range/
   ticker rebuild instead of resurrecting (it was rebuilt fresh each `renderChart`), and the page
   reopens on the last-selected range, not "All". Playwright-verified.
+- Then: replaced the repeated per-chart legends with ONE shared HTML legend (`#series-legend`,
+  three TTM/Forward/IBES chips that drive `hiddenSeries` across every chart; per-chart Chart.js
+  legends set `display:false`). Added column filters to the **delta** page (ag-grid floating-filter
+  row — text on ids, `agNumberColumnFilter` on values, e.g. Fwd P/E < 20). Playwright-verified
+  (3 chips, toggle hides line+tag on all charts; delta `now<20` → 20/39 rows). e2e still green.
 - Font: bundled **IBM Plex Mono** locally (OFL, `core/static/fonts/*.woff2`, no CDN) as `--mono`
   + ag-grid `fontFamily` + `Chart.defaults.font.family`. Closest free face to the Terminal's
   institutional monospace (VT323/Share Tech Mono compared, rejected). Emoji fallbacks appended;
