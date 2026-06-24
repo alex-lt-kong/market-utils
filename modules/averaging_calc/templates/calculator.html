@@ -1,0 +1,109 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Pyramiding Calculator</title>
+<meta name="theme-color" content="#0f172a">
+<style>
+body{font-family:system-ui,sans-serif;max-width:560px;margin:2rem auto;padding:0 1rem;background:#f8f9fa;color:#212529}
+a.back{color:#0d6efd;text-decoration:none;font-size:.85rem}
+h1{font-size:1.3rem;margin:.4rem 0 .15rem}
+p.sub{color:#6c757d;font-size:.9rem;margin-top:0}
+form{background:#fff;border:1px solid #dee2e6;border-radius:8px;padding:1rem 1.25rem;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+label{display:block;margin:.6rem 0}
+label span{display:block;font-size:.82rem;color:#495057;margin-bottom:.2rem}
+input{font:inherit;width:100%;box-sizing:border-box;padding:.45rem .6rem;border:1px solid #ced4da;border-radius:5px;text-align:right;font-variant-numeric:tabular-nums}
+input:focus{outline:none;border-color:#0d6efd;box-shadow:0 0 0 2px rgba(13,110,253,.15)}
+.cur{margin:.9rem 0;font-size:.9rem;color:#495057}
+.cur b{font-variant-numeric:tabular-nums}
+#out{margin-top:1rem}
+.err{color:#b45309;font-size:.88rem}
+table{width:100%;border-collapse:collapse;background:#fff;border:1px solid #dee2e6;border-radius:8px;overflow:hidden;box-shadow:0 1px 4px rgba(0,0,0,.08)}
+td{padding:.5rem .8rem;border-bottom:1px solid #f1f3f5;font-size:.92rem}
+tr:last-child td{border-bottom:none}
+td.k{color:#495057}
+td.v{text-align:right;font-variant-numeric:tabular-nums;font-weight:600}
+tr.hl td{background:#e7f5ff}
+.note{font-size:.82rem;color:#6c757d;margin-top:.6rem}
+.pos{color:#198754}.neg{color:#dc3545}
+</style>
+</head>
+<body>
+<a class="back" href="/">&larr; Toolbox</a>
+<h1>🗻 Pyramiding Calculator</h1>
+<p class="sub">How many more shares to add at market so your P/L% moves to a target.</p>
+
+<form id="f" autocomplete="off">
+  <label><span>Quantity held</span><input id="qty" type="number" step="any" inputmode="decimal" placeholder="e.g. 100"></label>
+  <label><span>Average cost</span><input id="avg" type="number" step="any" inputmode="decimal" placeholder="e.g. 100"></label>
+  <label><span>Market price</span><input id="px" type="number" step="any" inputmode="decimal" placeholder="e.g. 120"></label>
+  <label><span>Target P/L %</span><input id="tgt" type="number" step="any" inputmode="decimal" placeholder="e.g. 15"></label>
+</form>
+
+<div class="cur" id="cur"></div>
+<div id="out"></div>
+
+<script>
+const $ = id => document.getElementById(id);
+const num = id => { const v = parseFloat($(id).value); return Number.isFinite(v) ? v : null; };
+const money = n => n.toLocaleString(undefined, {minimumFractionDigits: 2, maximumFractionDigits: 2});
+const pct = n => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
+const cls = n => n >= 0 ? 'pos' : 'neg';
+
+// All math lives server-side in modules/averaging_calc/calc.py; the page just
+// asks /api/calc and renders. No formula here, so nothing can drift.
+const shares = n => n.toLocaleString(undefined, {maximumFractionDigits: 4});
+
+function show(d) {
+  const cur = $('cur'), out = $('out');
+  cur.innerHTML = `Current: <b class="${cls(d.current_pnl_pct)}">${pct(d.current_pnl_pct)}</b> &middot; ` +
+    `P/L <b class="${cls(d.pnl_amount)}">${money(d.pnl_amount)}</b>`;
+  if (d.target_pct === null || d.target_pct === undefined) { out.innerHTML = ''; return; }
+  if (!d.reachable) {
+    out.innerHTML = `<p class="err">Target must be strictly between ${pct(d.reachable_low_pct)} and ` +
+      `${pct(d.reachable_high_pct)}. Buying more shares can only pull your P/L% toward 0% — never to 0, ` +
+      `past it, or beyond your current level.</p>`;
+    return;
+  }
+  const p = d.plan;
+  out.innerHTML =
+    `<table>
+      <tr class="hl"><td class="k">Shares to buy</td><td class="v">${shares(p.shares_to_buy)}</td></tr>
+      <tr><td class="k">Capital required</td><td class="v">${money(p.capital_required)}</td></tr>
+      <tr><td class="k">New average cost</td><td class="v">${money(p.new_avg_cost)}</td></tr>
+      <tr><td class="k">New quantity</td><td class="v">${shares(p.new_qty)}</td></tr>
+      <tr><td class="k">Resulting P/L%</td><td class="v ${cls(p.new_pnl_pct)}">${pct(p.new_pnl_pct)}</td></tr>
+    </table>
+    <p class="note">Whole shares: buy <b>${p.shares_to_buy_whole.toLocaleString()}</b> &rarr; ` +
+    `P/L <b>${pct(p.whole_new_pnl_pct)}</b>. Dollar P/L stays ` +
+    `<b class="${cls(d.pnl_amount)}">${money(d.pnl_amount)}</b> — buying at market adds no gain or loss; ` +
+    `only the % changes.</p>`;
+}
+
+let seq = 0, timer;
+async function run() {
+  const qty = num('qty'), avg = num('avg'), px = num('px'), tgt = num('tgt');
+  if (qty === null || avg === null || px === null) { $('cur').innerHTML = ''; $('out').innerHTML = ''; return; }
+  const u = new URL('api/calc', document.baseURI);
+  u.searchParams.set('qty', qty); u.searchParams.set('avg_cost', avg); u.searchParams.set('mkt_px', px);
+  if (tgt !== null) u.searchParams.set('target_pct', tgt);
+  const my = ++seq;
+  try {
+    const r = await fetch(u);
+    if (my !== seq) return;  // a newer edit superseded this request
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      $('cur').innerHTML = ''; $('out').innerHTML = `<p class="err">${e.detail || ('Error ' + r.status)}</p>`;
+      return;
+    }
+    show(await r.json());
+  } catch (_) {
+    if (my === seq) $('out').innerHTML = '<p class="err">Network error — is the server reachable?</p>';
+  }
+}
+
+$('f').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 150); });
+</script>
+</body>
+</html>

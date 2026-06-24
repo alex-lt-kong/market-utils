@@ -2,6 +2,21 @@
 
 Older activity-log entries pruned from `MEMORY.md` (newest first).
 
+### 2026-06-22 — Fix review bugs #1, #5, dates; pin dependency set (#2)
+- Split `Module` into `lifespan` (always-run resource setup) + `scheduler` (gated by
+  `enable_schedulers`); `core/main.py` enters lifespans on every instance and schedulers
+  only when enabled — so a scheduler-disabled replica still runs `init_db` (#1).
+- Both module schedulers now live in a local variable inside their `scheduler` CM; the
+  module-global `_scheduler` (and ai_ratios `start`/`stop`) are gone, so concurrent app
+  instances no longer clobber each other (#5).
+- `_parse_iso_date` canonicalises via `.isoformat()` so basic-format/week-date inputs no
+  longer break SQLite lexical date comparisons.
+- Tests: rewrote lifecycle tests (instance capture + a schedulers-disabled-still-inits
+  guard), added `_parse_iso_date` unit tests; README module example updated. 21 pass.
+- #2: pinned requirements to the tested set (compatible-release `~=`), incl. starlette.
+  Stayed on `httpx` for TestClient (the deprecation points at an unverified `httpx2`
+  package — sandbox flagged it as supply-chain risk); silenced the warning in `pytest.ini`.
+
 ### 2026-06-22 — Review unified FastAPI branch
 - Reviewed the complete `main...origin/feat/unified-fastapi-landing` diff; the
   19-test suite hangs on its first request with the currently resolved unbounded

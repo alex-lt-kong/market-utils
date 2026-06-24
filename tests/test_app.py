@@ -36,7 +36,7 @@ def test_openapi_tags_and_dashboards_excluded(make_app):
 
 def test_discovery_order_and_unique_slugs():
     slugs = [m.slug for m in discover_modules()]
-    assert slugs == ["pe-monitor", "ai-ratios"]  # ordered by Module.order
+    assert slugs == ["pe-monitor", "averaging-calc", "ai-ratios"]  # ordered by Module.order
     assert len(slugs) == len(set(slugs))
 
 

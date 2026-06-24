@@ -6,6 +6,7 @@ One FastAPI app: a landing page mounting each tool as a self-contained **module*
 | Module | URL | What |
 |---|---|---|
 | P/E Monitor | `/pe-monitor` | Forward & TTM P/E watchlist. |
+| Pyramiding Calculator | `/averaging-calc` | Shares to add to move a position's P/L% to a target. |
 | AI Ratios | `/ai-ratios` | S&P 500 AI-exposure share. |
 
 ## Run
