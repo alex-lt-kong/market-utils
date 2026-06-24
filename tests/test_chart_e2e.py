@@ -123,6 +123,15 @@ def test_chart_aligns_and_shades_losses(live_server):
           }
           return o;
         }""")
+        # Panel toggle: clicking "Volume" hides every volume panel and strikes the chip.
+        toggle = page.evaluate("""() => {
+          const wrap = document.querySelector('.vol-wrap');
+          const volChip = () => [...document.querySelectorAll('#panel-toggle .series-chip')]
+                                   .find(c => c.textContent === 'Volume');
+          const before = getComputedStyle(wrap).display;
+          volChip().click();   // togglePanel rebuilds the chips, so re-query for the off state
+          return {before, after: getComputedStyle(wrap).display, off: volChip().classList.contains('off')};
+        }""")
     finally:
         browser.close()
         pw.stop()
@@ -135,4 +144,7 @@ def test_chart_aligns_and_shades_losses(live_server):
     # loss shading: present for the loss-maker, absent for the clean name
     assert diag["AAA"]["bands"] >= 1, "loss-making ticker should be shaded"
     assert diag["BBB"]["bands"] == 0, "always-profitable ticker should have no shading"
+    # panel toggle hides the volume panels and marks the chip off
+    assert toggle["before"] != "none" and toggle["after"] == "none", toggle
+    assert toggle["off"], "Volume chip should be struck-through after clicking"
     assert not page_errors, f"chart raised JS errors: {page_errors}"

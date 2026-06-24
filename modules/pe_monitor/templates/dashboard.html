@@ -84,7 +84,7 @@ section.summary h2,section.charts h2{
 .latest{color:var(--muted);font-size:.82rem;font-weight:normal;font-variant-numeric:tabular-nums}
 .empty{color:#adb5bd;font-size:.85rem;padding:2rem 0;text-align:center}
 .canvas-wrap{position:relative}
-.canvas-wrap.price-wrap{height:110px}
+.canvas-wrap.price-wrap{height:240px}
 .canvas-wrap.pe-wrap{height:240px}
 .canvas-wrap.vol-wrap{height:75px}
 canvas{width:100%!important;height:100%!important}
@@ -108,6 +108,9 @@ canvas{width:100%!important;height:100%!important}
 .series-chip .swatch{width:14px;height:3px;display:inline-block}
 .series-chip:hover{border-color:var(--border-strong)}
 .series-chip.off{opacity:.45;text-decoration:line-through}
+.panel-toggle{display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin:.3rem 0 .2rem}
+.panel-toggle .lbl{font-size:11px;letter-spacing:.04em;text-transform:uppercase;color:var(--muted)}
+.charts.hide-price .price-wrap,.charts.hide-pe .pe-wrap,.charts.hide-vol .vol-wrap{display:none}
 .chart-controls{display:flex;align-items:center;gap:.75rem;flex-wrap:wrap}
 .date-range{display:flex;align-items:center;gap:.3rem}
 .date-range input[type=date]{
@@ -196,6 +199,7 @@ canvas{width:100%!important;height:100%!important}
       </div>
     </div>
   </div>
+  <div class="panel-toggle" id="panel-toggle"></div>
   <div class="series-legend" id="series-legend"></div>
   <p id="history-placeholder" class="empty">Check one or more tickers above to view their historical chart.</p>
   {% for t in tickers %}
@@ -391,6 +395,34 @@ function toggleSeries(label) {
     if (i >= 0) { inst.pe.setDatasetVisibility(i, !hiddenSeries.has(label)); inst.pe.update(); }
   }
   renderSeriesLegend();
+}
+
+// Independent show/hide for each stacked panel (price / P/E / volume), applied as
+// CSS classes on the section so new cards inherit it; persisted across reloads.
+const PANELS = [{key: "price", label: "Price"}, {key: "pe", label: "P/E"}, {key: "vol", label: "Volume"}];
+const hiddenPanels = new Set(JSON.parse(localStorage.getItem("pe-hidden-panels") || "[]"));
+function applyPanelVisibility() {
+  const sec = document.querySelector("section.charts");
+  if (sec) for (const p of PANELS) sec.classList.toggle(`hide-${p.key}`, hiddenPanels.has(p.key));
+}
+function renderPanelToggle() {
+  const el = document.getElementById("panel-toggle");
+  if (!el) return;
+  el.innerHTML = '<span class="lbl">Panels</span>';
+  for (const p of PANELS) {
+    const chip = document.createElement("span");
+    chip.className = "series-chip" + (hiddenPanels.has(p.key) ? " off" : "");
+    chip.textContent = p.label;
+    chip.onclick = () => togglePanel(p.key);
+    el.appendChild(chip);
+  }
+}
+function togglePanel(key) {
+  if (hiddenPanels.has(key)) hiddenPanels.delete(key); else hiddenPanels.add(key);
+  localStorage.setItem("pe-hidden-panels", JSON.stringify([...hiddenPanels]));
+  applyPanelVisibility();
+  renderPanelToggle();
+  reflowCharts();   // a panel revealed from display:none built at 0px; resize fixes it
 }
 const chartInstances = new Map();
 const historyRows = new Map();   // ticker -> fetched rows for the current range
@@ -745,9 +777,9 @@ function renderChart(ticker, xMin, xMax) {
                            afterFit: pinX, ...extra});
   const dateTitle = items => (items.length ? fmtDateAxis(items[0].parsed.x) : "");
 
-  // Price rides the same pinned date axis above P/E. Since P/E = price / EPS,
-  // the price line diverging from TTM P/E is the visual tell of an EPS revision.
-  const fmtPriceAxis = v => v >= 1000 ? v.toLocaleString("en-US", {maximumFractionDigits: 0}) : v.toFixed(2);
+  // Price rides the same pinned date axis above P/E (P/E = price/EPS, so price
+  // diverging from TTM P/E flags an EPS revision). Log y: equal % == equal height.
+  const fmtPriceAxis = v => v.toLocaleString("en-US", {maximumFractionDigits: v >= 100 ? 0 : 2});
   const priceChart = new Chart(priceCtx, {
     type: "line",
     data: {
@@ -758,7 +790,7 @@ function renderChart(ticker, xMin, xMax) {
       maintainAspectRatio: false,
       interaction: {mode: "index", intersect: false},
       scales: {
-        y: {beginAtZero: false, position: "right", afterFit: pinWidth, ticks: {callback: fmtPriceAxis, maxTicksLimit: 3}},
+        y: {type: "logarithmic", position: "right", afterFit: pinWidth, ticks: {callback: fmtPriceAxis, maxTicksLimit: 4}},
         x: xAxis({ticks: {display: false}, grid: {display: false}}),
       },
       plugins: {
@@ -918,6 +950,8 @@ function initPanelSplitter() {
   }
   restorePeriod();
   renderSeriesLegend();
+  renderPanelToggle();
+  applyPanelVisibility();
   initPanelSplitter();
   updateHistoryPlaceholder();
   await loadSnapshot();
