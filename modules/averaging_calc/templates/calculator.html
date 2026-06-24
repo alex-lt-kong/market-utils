@@ -51,58 +51,59 @@ const money = n => n.toLocaleString(undefined, {minimumFractionDigits: 2, maximu
 const pct = n => (n >= 0 ? '+' : '') + n.toFixed(2) + '%';
 const cls = n => n >= 0 ? 'pos' : 'neg';
 
-// Mirror of modules/averaging_calc/calc.py
-function reachable(target, current) {
-  if (current === 0 || target === 0) return false;
-  return (current > 0 && target > 0 && target < current) || (current < 0 && target < 0 && target > current);
-}
+// All math lives server-side in modules/averaging_calc/calc.py; the page just
+// asks /api/calc and renders. No formula here, so nothing can drift.
+const shares = n => n.toLocaleString(undefined, {maximumFractionDigits: 4});
 
-function render() {
-  const qty = num('qty'), avg = num('avg'), px = num('px'), tgtPct = num('tgt');
+function show(d) {
   const cur = $('cur'), out = $('out');
-  cur.innerHTML = ''; out.innerHTML = '';
-
-  if (qty === null || avg === null || px === null) return;
-  if (qty <= 0 || avg <= 0 || px <= 0) {
-    cur.innerHTML = '<span class="err">Quantity, average cost and market price must be positive.</span>';
+  cur.innerHTML = `Current: <b class="${cls(d.current_pnl_pct)}">${pct(d.current_pnl_pct)}</b> &middot; ` +
+    `P/L <b class="${cls(d.pnl_amount)}">${money(d.pnl_amount)}</b>`;
+  if (d.target_pct === null || d.target_pct === undefined) { out.innerHTML = ''; return; }
+  if (!d.reachable) {
+    out.innerHTML = `<p class="err">Target must be strictly between ${pct(d.reachable_low_pct)} and ` +
+      `${pct(d.reachable_high_pct)}. Buying more shares can only pull your P/L% toward 0% — never to 0, ` +
+      `past it, or beyond your current level.</p>`;
     return;
   }
-
-  const curPct = (px / avg - 1) * 100;
-  const curPnl = qty * (px - avg);
-  cur.innerHTML = `Current: <b class="${cls(curPct)}">${pct(curPct)}</b> &middot; ` +
-    `P/L <b class="${cls(curPnl)}">${money(curPnl)}</b>`;
-
-  if (tgtPct === null) return;
-  if (!reachable(tgtPct, curPct)) {
-    const lo = Math.min(0, curPct), hi = Math.max(0, curPct);
-    out.innerHTML = `<p class="err">Target must be strictly between ${pct(lo)} and ${pct(hi)}. ` +
-      `Buying more shares can only pull your P/L% toward 0% — never to 0, past it, or beyond your current level.</p>`;
-    return;
-  }
-
-  const t = tgtPct / 100;
-  const add = qty * (px - avg * (1 + t)) / (px * t);
-  const newQty = qty + add;
-  const newAvg = (qty * avg + add * px) / newQty;
-  const capital = add * px;
-  const whole = Math.ceil(add);
-  const wholeAvg = (qty * avg + whole * px) / (qty + whole);
-  const wholePct = (px / wholeAvg - 1) * 100;
-
+  const p = d.plan;
   out.innerHTML =
     `<table>
-      <tr class="hl"><td class="k">Shares to buy</td><td class="v">${add.toLocaleString(undefined,{maximumFractionDigits:4})}</td></tr>
-      <tr><td class="k">Capital required</td><td class="v">${money(capital)}</td></tr>
-      <tr><td class="k">New average cost</td><td class="v">${money(newAvg)}</td></tr>
-      <tr><td class="k">New quantity</td><td class="v">${newQty.toLocaleString(undefined,{maximumFractionDigits:4})}</td></tr>
-      <tr><td class="k">Resulting P/L%</td><td class="v ${cls(tgtPct)}">${pct(tgtPct)}</td></tr>
+      <tr class="hl"><td class="k">Shares to buy</td><td class="v">${shares(p.shares_to_buy)}</td></tr>
+      <tr><td class="k">Capital required</td><td class="v">${money(p.capital_required)}</td></tr>
+      <tr><td class="k">New average cost</td><td class="v">${money(p.new_avg_cost)}</td></tr>
+      <tr><td class="k">New quantity</td><td class="v">${shares(p.new_qty)}</td></tr>
+      <tr><td class="k">Resulting P/L%</td><td class="v ${cls(p.new_pnl_pct)}">${pct(p.new_pnl_pct)}</td></tr>
     </table>
-    <p class="note">Whole shares: buy <b>${whole.toLocaleString()}</b> &rarr; P/L <b>${pct(wholePct)}</b>. ` +
-    `Dollar P/L stays <b class="${cls(curPnl)}">${money(curPnl)}</b> — buying at market adds no gain or loss; only the % changes.</p>`;
+    <p class="note">Whole shares: buy <b>${p.shares_to_buy_whole.toLocaleString()}</b> &rarr; ` +
+    `P/L <b>${pct(p.whole_new_pnl_pct)}</b>. Dollar P/L stays ` +
+    `<b class="${cls(d.pnl_amount)}">${money(d.pnl_amount)}</b> — buying at market adds no gain or loss; ` +
+    `only the % changes.</p>`;
 }
 
-$('f').addEventListener('input', render);
+let seq = 0, timer;
+async function run() {
+  const qty = num('qty'), avg = num('avg'), px = num('px'), tgt = num('tgt');
+  if (qty === null || avg === null || px === null) { $('cur').innerHTML = ''; $('out').innerHTML = ''; return; }
+  const u = new URL('api/calc', document.baseURI);
+  u.searchParams.set('qty', qty); u.searchParams.set('avg_cost', avg); u.searchParams.set('mkt_px', px);
+  if (tgt !== null) u.searchParams.set('target_pct', tgt);
+  const my = ++seq;
+  try {
+    const r = await fetch(u);
+    if (my !== seq) return;  // a newer edit superseded this request
+    if (!r.ok) {
+      const e = await r.json().catch(() => ({}));
+      $('cur').innerHTML = ''; $('out').innerHTML = `<p class="err">${e.detail || ('Error ' + r.status)}</p>`;
+      return;
+    }
+    show(await r.json());
+  } catch (_) {
+    if (my === seq) $('out').innerHTML = '<p class="err">Network error — is the server reachable?</p>';
+  }
+}
+
+$('f').addEventListener('input', () => { clearTimeout(timer); timer = setTimeout(run, 150); });
 </script>
 </body>
 </html>

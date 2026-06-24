@@ -3,10 +3,12 @@
 ## Active Status
 
 **Latest:** Added a **Pyramiding Calculator** module (branch `feat/avg-down-calculator`,
-off `main`; package/slug stay `averaging_calc`/`averaging-calc`) — shares to add at market to
-move a position's P/L% to a target. Self-contained,
-55 tests pass; immediate next step is to open its PR. The pe_monitor chart thread below is the
-other open branch (`fix/pe-chart-downsample-gaps`).
+off `main`; package/slug `averaging_calc`/`averaging-calc`, icon 🗻) — shares to add at market
+to move a position's P/L% to a target. Math is single-sourced in `calc.py::evaluate()` (page
+fetches the API; no JS formula). Independent review applied: non-finite inputs no longer 500,
+the target≈current knife-edge can't emit negative shares; 72 tests + Playwright pass. Pushed;
+immediate next step is to open its PR. The pe_monitor chart thread below is the other open
+branch (`fix/pe-chart-downsample-gaps`).
 
 **Objective:** pe_monitor now handles money-losing companies correctly — forward-P/E
 lines (live red + IBES green) **break** across forecast-loss windows instead of
@@ -56,19 +58,29 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 
 ### 2026-06-24 — Add Pyramiding Calculator module (branch `feat/avg-down-calculator`)
 - New self-contained module `modules/averaging_calc/` (display name "Pyramiding Calculator",
-  slug `averaging-calc`): given a position (qty, avgCost, mktPx) and a target P/L%, returns the
-  shares to add at market to move the % from its current level to the target. Auto-discovered by
-  the registry → landing card (order=20, icon 🔺). Primary use: pressing a *winning* position —
-  raise cost basis to dial a gaudy gain back (e.g. +20→+15); also handles averaging down a loss.
-  No data/scheduler/lifespan — just a router + one page + a tiny calc.
-- Math (`calc.py`): `x = qty·(px − avgCost·(1+t)) / (px·t)`. Buying at market pulls avg cost
-  toward px, so P/L% only shrinks toward 0 — reachable band is strictly between 0 and the
-  current% (validated; `ValueError` → API 400). Dollar P/L is unchanged by the buy (only the
-  % moves). Works both ways: dilute a gain (+20→+15) and average down a loss (−20→−10).
-- Live UI is pure client-side JS in `calculator.html` mirroring `calc.py`; thin
-  `GET /averaging-calc/api/calc` exposes the same `plan()` as the tested/canonical surface.
-- Tests: `tests/test_averaging_calc.py` (7); updated `test_discovery_order_and_unique_slugs`
-  for the new slug. 55 pass. Cross-checked JS vs Python in node (identical results).
+  slug `averaging-calc`, icon 🗻 Mount Fuji — Unicode has no pyramid glyph): given a position
+  (qty, avgCost, mktPx) and a target P/L%, returns the shares to add at market to move the %
+  from its current level to the target. Landing card at order=20. Primary use: pressing a
+  *winning* position — raise cost basis to dial a gaudy gain back (e.g. +20→+15); also averages
+  down a loss. No data/scheduler/lifespan. README module table updated.
+- Math (`calc.py`): `x = qty·(px − avgCost·(1+t)) / (px·t)`, i.e. new% = Q(P−C)/(QC+xP) =
+  constant dollar P/L over a growing cost basis. P/L% only shrinks toward 0; reachable band is
+  strictly between 0 and current%. Dollar P/L is unchanged by the buy.
+- **Single source of truth (Approach A):** all math lives in `calc.py::evaluate()`; the page
+  `calculator.html` just `fetch()`es `GET /api/calc` (debounced, race-guarded) and renders — no
+  formula in the browser, so nothing can drift. `target_pct` is optional (current-only readout);
+  an unreachable target is `200 {reachable:false, plan:null}`, not an error; whole-share figures
+  are computed server-side too.
+- **Hardening from an independent review (all verified):** (1) non-finite inputs `inf`/`nan`/
+  `1e309` were returning HTTP **500** (Starlette `JSONResponse` uses `allow_nan=False`) — now
+  `math.isfinite` validates all four inputs → **400**; (2) an output finiteness guard (incl.
+  before `math.ceil`, which raises `OverflowError` on `inf`) so pathological *finite* overflow
+  also 400s, never 500; (3) `target==current` float knife-edge could emit a ~1e-12 *negative*
+  share count — guarded by requiring `shares_to_buy > 0` before marking reachable.
+- Verified: re-derived formula independently; 200k+50k random round-trips reproduce the target%
+  to ~1e-13; monotonicity 0 violations; **Playwright** browser drive renders correctly with no
+  console errors. `tests/test_averaging_calc.py` (18) + `test_discovery_order_and_unique_slugs`
+  fix. **72 tests pass.** Pushed; PR not yet opened.
 
 ### 2026-06-23 — Forward-P/E money-losing handling (Design Y, branch `fix/pe-chart-gaps-and-ibes-neg`)
 - Problem: a company forecast to lose money has negative forward EPS ⇒ forward P/E is

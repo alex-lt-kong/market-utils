@@ -21,8 +21,8 @@ def page(request: Request) -> HTMLResponse:
 
 
 @router.get("/api/calc")
-def api_calc(qty: float, avg_cost: float, mkt_px: float, target_pct: float):
+def api_calc(qty: float, avg_cost: float, mkt_px: float, target_pct: float | None = None):
     try:
-        return calc.plan(qty, avg_cost, mkt_px, target_pct)
+        return calc.evaluate(qty, avg_cost, mkt_px, target_pct)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
