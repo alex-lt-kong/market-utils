@@ -2,6 +2,12 @@
 
 ## Active Status
 
+**Latest:** Added a **Pyramiding Calculator** module (branch `feat/avg-down-calculator`,
+off `main`; package/slug stay `averaging_calc`/`averaging-calc`) — shares to add at market to
+move a position's P/L% to a target. Self-contained,
+55 tests pass; immediate next step is to open its PR. The pe_monitor chart thread below is the
+other open branch (`fix/pe-chart-downsample-gaps`).
+
 **Objective:** pe_monitor now handles money-losing companies correctly — forward-P/E
 lines (live red + IBES green) **break** across forecast-loss windows instead of
 bridging them or plotting a negative P/E. Done on branch `fix/pe-chart-gaps-and-ibes-neg`
@@ -47,6 +53,22 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   npm registry reachable here; external UAT host is NOT (sandbox egress).
 
 ## Activity Log
+
+### 2026-06-24 — Add Pyramiding Calculator module (branch `feat/avg-down-calculator`)
+- New self-contained module `modules/averaging_calc/` (display name "Pyramiding Calculator",
+  slug `averaging-calc`): given a position (qty, avgCost, mktPx) and a target P/L%, returns the
+  shares to add at market to move the % from its current level to the target. Auto-discovered by
+  the registry → landing card (order=20, icon 🔺). Primary use: pressing a *winning* position —
+  raise cost basis to dial a gaudy gain back (e.g. +20→+15); also handles averaging down a loss.
+  No data/scheduler/lifespan — just a router + one page + a tiny calc.
+- Math (`calc.py`): `x = qty·(px − avgCost·(1+t)) / (px·t)`. Buying at market pulls avg cost
+  toward px, so P/L% only shrinks toward 0 — reachable band is strictly between 0 and the
+  current% (validated; `ValueError` → API 400). Dollar P/L is unchanged by the buy (only the
+  % moves). Works both ways: dilute a gain (+20→+15) and average down a loss (−20→−10).
+- Live UI is pure client-side JS in `calculator.html` mirroring `calc.py`; thin
+  `GET /averaging-calc/api/calc` exposes the same `plan()` as the tested/canonical surface.
+- Tests: `tests/test_averaging_calc.py` (7); updated `test_discovery_order_and_unique_slugs`
+  for the new slug. 55 pass. Cross-checked JS vs Python in node (identical results).
 
 ### 2026-06-23 — Forward-P/E money-losing handling (Design Y, branch `fix/pe-chart-gaps-and-ibes-neg`)
 - Problem: a company forecast to lose money has negative forward EPS ⇒ forward P/E is
@@ -136,20 +158,5 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
 - `tests/test_delta.py` (6 tests): window/snap/interp logic + endpoint shape/fallback. 27 pass.
 - Branch `feat/delta-fwd-pe`, rebased onto `main` after PR #6 (unified-fastapi-landing)
   merged; pushed for its own PR.
-
-### 2026-06-22 — Fix review bugs #1, #5, dates; pin dependency set (#2)
-- Split `Module` into `lifespan` (always-run resource setup) + `scheduler` (gated by
-  `enable_schedulers`); `core/main.py` enters lifespans on every instance and schedulers
-  only when enabled — so a scheduler-disabled replica still runs `init_db` (#1).
-- Both module schedulers now live in a local variable inside their `scheduler` CM; the
-  module-global `_scheduler` (and ai_ratios `start`/`stop`) are gone, so concurrent app
-  instances no longer clobber each other (#5).
-- `_parse_iso_date` canonicalises via `.isoformat()` so basic-format/week-date inputs no
-  longer break SQLite lexical date comparisons.
-- Tests: rewrote lifecycle tests (instance capture + a schedulers-disabled-still-inits
-  guard), added `_parse_iso_date` unit tests; README module example updated. 21 pass.
-- #2: pinned requirements to the tested set (compatible-release `~=`), incl. starlette.
-  Stayed on `httpx` for TestClient (the deprecation points at an unverified `httpx2`
-  package — sandbox flagged it as supply-chain risk); silenced the warning in `pytest.ini`.
 
 _(Older entries moved to `MEMORY_ARCHIVE.md`.)_
