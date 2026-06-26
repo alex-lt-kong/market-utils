@@ -2,28 +2,37 @@
 
 ## Active Status
 
-**Latest:** **Bloomberg-terminal UI overhaul** + rename to **Gambler's Terminal** on branch
-`feat/bloomberg-terminal-theme` (off `main`, which now includes the merged Pyramiding Calculator,
-PR #11). Shared `core/static/terminal.css` (black/amber/green-red, IBM Plex Mono bundled locally)
-themes all pages; ag-grid + Chart.js recoloured, and charts are now Bloomberg *GP*-style (price
-axis on the **right** + colored last-value tags; crosshair declined). Struck legend series and the
-selected time range now persist (localStorage). 76 tests + Playwright pass; **pushed** to
-`origin/feat/bloomberg-terminal-theme` (theme/charts), PR not opened. The two persistence tweaks
-are committed locally on top — push when ready.
+**Latest:** Added a **4th module** `modules/crypto_tracker/` (display "Crypto Tracker", slug
+`crypto-tracker`, icon 🪙, `order=120` → sorts last on the landing menu) on branch
+`feat/crypto-tracker`, cut from `feat/bloomberg-terminal-theme` so it inherits `terminal.css` and the
+themed siblings. Ports a standalone Binance-TWR CLI into the module architecture: computes **TWR /
+MWR (XIRR) / CAGR** over All-time/5Y/3Y/YTD/1Y/90D/30D for a multi-asset (BTC/ETH) portfolio whose
+transactions live in a CSV of `(date, asset, delta, note)` rows, USD-proxied by Binance USDT-pair
+closes. Same cache+scheduler shape as `ai_ratios`: in-memory `cache.py` (single-flight refresh, keeps
+last-known-good + `last_error` on failure), 15-min `BackgroundScheduler` + one-off initial pull,
+served by `views.py` (dashboard + `/api/data` + `POST /api/refresh`). Terminal-themed dashboard:
+holdings table beside a sign-colored returns table (n/a under ~1y). Historical klines cached on disk
+(`.price_cache.json`, gitignored — immutable). **`portfolio.csv` is gitignored** (real holdings stay
+local, like `config.toml`); committed `portfolio.sample.csv` documents the schema. No host-config or
+new dependency (`requests` already pinned). Prior `feat/bloomberg-terminal-theme` (price panel +
+per-panel toggles, review-clean) is the unmerged base of this branch.
 
-**Objective:** pe_monitor now handles money-losing companies correctly — forward-P/E
-lines (live red + IBES green) **break** across forecast-loss windows instead of
-bridging them or plotting a negative P/E. Done on branch `fix/pe-chart-gaps-and-ibes-neg`
-(cut off `feat/pe-chart-enhancements`). Key invariant: forward-P/E columns store the raw
-*signed* ratio; the "non-positive ⇒ undefined" rule lives at serve time
-(`_interpolate_series` for charts/delta, `_hide_nonpositive_pe` for the latest grid).
+**Deferred (event-triggered, not scheduled):** a stock split will put a fake cliff in the
+price panel because daily snapshots store raw `currentPrice` (`fetcher.py:46`) and are never
+back-adjusted — only the `auto_adjust=True` backfill is. P/E lines are split-invariant so they
+stay smooth, making price spuriously diverge. Fix WHEN the first split lands: read `yt.splits`
+at crawl time, back-adjust prior stored `price`/`volume`, migrate existing rows. No split column
+in `storage.py` today; no `yt.splits` read anywhere.
 
-**Immediate next steps:** Open the PR — chart work is Playwright-verified (breaks, time axis,
-alignment, even ticks, loss bands) and the review findings are addressed (delta N/A on loss;
-custom-range right-anchor; zero-P/E guard). Still open: guard chart history against stale
-responses (transient wrong window on fast range-switching). Deferred to a follow-up PR:
-gap-aware downsampling (loss gaps can vanish at coarse zoom), the explicit-series-state
-refactor, and a Playwright/JS E2E test (covers the untested chart JS).
+**Objective:** Ship the `crypto-tracker` module on `feat/crypto-tracker`. Because it branches off the
+still-unmerged `feat/bloomberg-terminal-theme` (for `terminal.css`), merge order is bloomberg first,
+then crypto-tracker — or rebase crypto-tracker onto `main` once bloomberg lands.
+
+**Immediate next steps:** Commit/push `feat/crypto-tracker` and open its PR. **Binance egress is
+unverified in this sandbox** — the live `compute()`/scheduler path (and thus the dashboard with real
+data) has NOT been exercised here; only the network-free math + API/template tests have. Verify a live
+refresh in an environment that can reach `api.binance.com` before relying on it. The pre-existing
+`tests/test_app.py::test_landing_and_modules_open` hang is intermittent (passed in this run).
 
 - `core/` — host shell: `module.py` (interface), `registry.py` (discovery), `auth.py`
   (token→cookie gate), typed `config.py` (Pydantic `HostConfig`), `main.py`
@@ -32,6 +41,9 @@ refactor, and a Playwright/JS E2E test (covers the untested chart JS).
   APIRouter; `backfill/` tools still run standalone via the `_bootstrap` sys.path shim.
 - `modules/ai_ratios/` — S&P AI-exposure ratio; computes via `core.py`, caches in `cache.py`
   with its own scheduler; `views.py` serves dashboard + JSON API.
+- `modules/crypto_tracker/` — crypto portfolio TWR/MWR/CAGR. `twr.py` (math + `compute()`),
+  `cache.py` (in-memory cache + 15-min scheduler), `views.py` (dashboard + JSON API). Reads
+  `portfolio.csv` (gitignored; `portfolio.sample.csv` committed); disk price cache `.price_cache.json`.
 
 **Run:** `pip install -r requirements.txt` then `python -m core --config config.toml`
 (`--config` is mandatory; default bind 9090). Auth is off until `auth_tokens` are set;
@@ -56,6 +68,70 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   npm registry reachable here; external UAT host is NOT (sandbox egress).
 
 ## Activity Log
+
+### 2026-06-26 — Add Crypto Tracker module (branch `feat/crypto-tracker`)
+- New self-contained module `modules/crypto_tracker/` (4th; "Crypto Tracker", slug `crypto-tracker`,
+  icon 🪙, `order=120`). Ports the standalone `twr.py` Binance CLI into the host architecture without
+  changing its return math; assets in `config.ASSET_SYMBOLS` (BTC/ETH), 15-min refresh. Branched off
+  `feat/bloomberg-terminal-theme` for `terminal.css`.
+- `twr.py`: kept the original pure functions (`balance_at`, `xirr`/`xnpv`, `twr_over_range`,
+  `mwr_over_range`, `annualize_cumul`) and added `compute()` → `{computed_at, as_of, total_value,
+  holdings[], ranges[]}`; `main()` still prints standalone via `python -m modules.crypto_tracker.twr`.
+  `load_portfolio()` returns `[]` when the CSV is absent.
+- `cache.py`/`views.py` mirror `ai_ratios`: single-flight in-memory cache, `BackgroundScheduler`
+  (interval + one-off initial), `GET /api/data`, `POST /api/refresh` (409 when busy). A failed
+  refresh keeps last-known-good and sets `last_error`, so Binance being unreachable degrades to a
+  warning rather than an error page.
+- Dashboard (`templates/dashboard.html`, terminal-themed): holdings table + sign-colored
+  TWR/MWR/CAGR table; renders a "no data yet" state from the empty cache (200 before first compute,
+  like ai_ratios). Jinja `pct` macro for n/a/up/down; money via `{:,.2f}`.
+- Data: `portfolio.csv` **gitignored** (real holdings local-only — user's call), seeded by committed
+  `portfolio.sample.csv`; `.price_cache.json` gitignored (immutable klines). README table + Run steps
+  updated. No host-config change; `requests` already pinned.
+- Tests: `tests/test_crypto_tracker.py` (17) — TWR doubles on a single deposit; TWR≈0 vs MWR>0 on a
+  flat-price dip-buy (the time- vs money-weighted distinction); XIRR recovers 10%; CAGR n/a under a
+  year; populated-template render; refresh single-flight (409) + keeps-last-good on failure. Updated
+  `test_app.py` discovery-order/landing/openapi-tag assertions for the 4th module. **93 tests pass.**
+  Network-free — the live Binance `compute()` path was NOT exercised here (sandbox egress).
+
+### 2026-06-25 — Price panel + per-panel toggles on pe-monitor charts (branch `feat/bloomberg-terminal-theme`)
+- Added a third stacked panel (cyan `#3bc9ff` line) above P/E, reusing the existing
+  `pinX`/`Y_AXIS_WIDTH`/`offset:false` machinery so price, P/E and volume share one date axis.
+  Front-end only; `price`/`currency` already in each history row. Commit `531aaea`.
+- Rationale: P/E = price/EPS, so price diverging from TTM P/E is the visual tell of an EPS
+  revision. Chose a separate panel over a dual y-axis (avoids the arbitrary-scale trap and the
+  right-pinned-axis layout from `581d9f7`).
+- Refined (`0416547`): panel 110px→240px and a **logarithmic** price y-axis (price is always
+  positive, so log is safe; P/E stays linear because it can go negative/null). Equal % moves now
+  read as equal height, fixing the price-vs-P/E amplitude mismatch the short linear panel caused.
+- Added three independent global **panel toggles** (Price / P/E / Volume) that show/hide each
+  panel across all ticker charts via `hide-*` classes on `section.charts`; persisted in
+  `localStorage`. Distinct from the TTM/Forward/IBES legend, which toggles lines inside the P/E panel.
+- Extended `test_chart_e2e.py`: price panel exists and aligns with P/E + volume; Volume toggle hides panels.
+- Split handling deliberately deferred until the first split occurs (see Active Status).
+- Review pass `34179f3` — four findings fixed: (1) P1 font license — added verbatim SIL OFL 1.1
+  at `core/static/fonts/OFL.txt` beside the `.woff2` files (canonical text; upstream fetch only
+  paraphrased, so worth a re-check). (2) Hiding Volume stripped every date label (only Volume
+  showed the x axis) — date labels now follow `bottomVisiblePanel()` via a shared `dateX(key)`;
+  toggles re-render through new `redrawCharts()`. (3) Value tags could pile up at the plot bottom —
+  added an upward bounce pass after the downward spacing pass. (4) Mouse-only chips — shared
+  `makeChip()` gives series + panel chips `role=button`/`tabindex`/`aria-pressed` + Enter/Space.
+- e2e now guards the date-axis re-homing (Volume visible→owns axis; hidden→labels move to P/E) and
+  chip a11y attributes. No deterministic test for the tag-overlap case (tag pixel positions aren't exposed).
+
+### 2026-06-24 — Review `feat/bloomberg-terminal-theme`
+- Fetched and compared the four-commit branch with current `origin/main` (15 changed files);
+  `git diff --check`, Python compilation, and 75-test collection pass.
+- Found Chart.js visibility is checked through the tri-state `meta.hidden`; a newly rebuilt chart
+  has `meta.hidden === null`, so a dataset configured with `hidden: true` still gets a ghost
+  last-value tag. Use `chart.isDatasetVisible(i)` and cover reload/range rebuilds.
+- Found the last-value plugin scans backward over terminal nulls, so a series currently undefined
+  during a forecast-loss window can show a stale pre-loss value pinned to the right axis.
+- Found the two redistributed IBM Plex Mono WOFF2 files have no OFL/copyright text in the tree.
+- Full and non-E2E pytest runs timed out; `-vv` locates the stall at the first TestClient request,
+  `tests/test_app.py::test_landing_and_modules_open`, before any branch-specific assertion. The
+  same isolated test also times out on an exported `origin/main` tree, confirming it is not a
+  regression from this branch.
 
 ### 2026-06-24 — Bloomberg-terminal theme + rename to "Gambler's Terminal" (branch `feat/bloomberg-terminal-theme`)
 - Overhauled look/feel to mimic a Bloomberg Terminal. New shared `core/static/terminal.css`
@@ -119,81 +195,5 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   to ~1e-13; monotonicity 0 violations; **Playwright** browser drive renders correctly with no
   console errors. `tests/test_averaging_calc.py` (18) + `test_discovery_order_and_unique_slugs`
   fix. **76 tests pass.** Pushed; PR not yet opened.
-
-### 2026-06-23 — Forward-P/E money-losing handling (Design Y, branch `fix/pe-chart-gaps-and-ibes-neg`)
-- Problem: a company forecast to lose money has negative forward EPS ⇒ forward P/E is
-  undefined. Three write-sites stored a *negative* P/E (live `fetcher` via Yahoo
-  `forwardPE`; `import_wayback_fwdpe`; `import_ibes` PRICE/MEANEST) that plotted below
-  zero, and `_interpolate_series` *bridged* the loss gaps, faking a smooth trend.
-- Design Y — store signed, break at serve: forward-P/E columns keep the raw *signed* ratio
-  (negative = forecast loss); no source guards, no schema change. `_interpolate_series`
-  reworked in EPS-space — nulls loss anchors and never interpolates a span a loss bounds,
-  so the line breaks from last-profitable to next-profitable anchor (kills the near-zero
-  +∞ interpolation spike: MU max served 115.7 vs a 2887 spike). TTM stays nulled-at-source
-  (it isn't interpolated). `_hide_nonpositive_pe` enforces the rule on the latest grid.
-- Chart `dashboard.html`: a `segment.borderColor` callback breaks a line only at *genuine*
-  gaps (row present, value null) while still bridging *alignment* gaps (ticker lacks a union
-  date) — both are `null` and `spanGaps` bridged both before. NOTE: first impl had a dead
-  loop — Chart.js emits one segment per *adjacent* pair (p1DataIndex = p0DataIndex+1), so
-  scanning indices *between* the endpoints never fired and no line broke (caught visually on
-  UAT, not by tests). Fixed to test the segment's two endpoints against the genuine-gap mask.
-- An earlier "drop negatives at source + null the DB" attempt was reverted in favour of Y.
-  Verified: 33 tests pass (+`test_interpolate_breaks_across_forward_loss`); MU IBES breaks
-  Jul–Sep 2023; 0 negatives served across all 39 tickers; NIO → 98 positive fwd-P/E days.
-- Follow-up refactor (same branch): replaced the categorical *union-date* x-axis with a
-  shared **linear time axis** (x = epoch-ms). The union made per-ticker density distort time
-  — equal calendar spans rendered at unequal width (INTC 1986→ at 30d buckets vs ARM daily ⇒
-  recent years ~15× wider). This deletes `unionDates`/`alignRows`/`col`/`genuineGap`, so
-  `segmentBreak` is gone too — replaced by plain `spanGaps:false` (one ticker per chart ⇒
-  every null is a genuine gap). `cutoffLine` maps date→pixel via the scale.
-- Verified the axis math via **headless Chart.js** (node + stubbed canvas): line/bar data map
-  to exact axis pixels. Caught+fixed there: bar charts default `offset:true`, insetting the
-  volume bars to ~83% of the width while the lines use the full axis (looked like vol not
-  matching the lines / data "squished") — forced `offset:false` on both x-axes.
-- Stood up local **Playwright** E2E (headless Chromium + app on :9090). It caught what the
-  headless axis-math missed: the volume x-axis reserves a right gutter for its last date
-  label that the label-less P/E axis didn't → ~29px misalignment (pe_plot 1023 vs vol 994).
-  Fixed with `pinX` (afterFit `paddingRight=36`) on both → both `[58,992]`. Also added even
-  round-date ticks (`niceDateTicks` + `fmtDateTick`) and cleared the review findings (2 stale
-  comments, single-point-extent guard). All Playwright-verified (geometry, ticks, no errors).
-- **Loss shading** (`lossBandsPlugin`): a semi-transparent band tinted to each line over the
-  periods its P/E is undefined (a missing line otherwise reads as a glitch). TTM: client-side,
-  null P/E within trailing-EPS coverage (reaches edges; day-gaps in trailing-EPS don't
-  fragment it). Forward/IBES: a server loss flag `<col>_loss` from `_interpolate_series` — the
-  client can't tell a forecast-loss null from a no-data null at the *visible edge* (e.g. MU's
-  IBES loss starts before its first in-window positive anchor). Sub-3-week gaps dropped as
-  interp noise. Playwright-verified: INTC blue-only, MU blue+green, NIO blue+red+green.
-- Review findings fixed: delta `now` → N/A when the latest forward P/E is a loss (was a stale
-  pre-loss value); `_history_rows` reaches forward to the right anchor (new
-  `storage.earliest_value_date`) so a custom window inside a sparse gap interpolates instead
-  of rendering blank (verified on MU 2021-08: 0 → 5 values); a stored 0 P/E is nulled (was
-  plotting y:0). +3 tests (36 total). Deferred to a follow-up PR: gap-aware downsampling,
-  explicit-series-state refactor, Playwright/JS E2E.
-
-### 2026-06-23 — Review `feat/pe-chart-enhancements`
-- Compared the fetched feature ref against `origin/main` (3 commits; 4 files).
-- Found overlapping history requests can populate/render the cache with an obsolete
-  range after the user has selected a newer range.
-- Found history is clipped to a custom start before interpolation, so a window starting
-  inside a sparse forward-P/E gap loses values until the next in-window anchor.
-- Refactoring opportunities: share the duplicated column chooser and replace the
-  categorical union-date axis with a true time axis.
-
-### 2026-06-22 — Review fixes on `feat/delta-fwd-pe` (sort, config hardening, delta perf)
-- Reviewed the whole project; fixed four items, each its own commit:
-  1. Delta page sorted wrong — the `delta_pct` column's `sort: "desc"` overrode the JS
-     magnitude sort. Dropped it so default order is |Δ%|-desc (header still sortable).
-  2. `HostConfig` now `extra="forbid"` — a typo'd `auth_token` no longer silently
-     disables auth.
-  3. `build_app` calls `check_secret` (renamed from `_check_secret`) so a weak secret +
-     auth is rejected regardless of construction path, not just via `load_config`.
-  4. `api_delta` read the full per-ticker history (back to 1986, ~10k rows × 39) every
-     request. New `storage.latest_value_date` + `views._delta_rows` bound the read to
-     `[latest forward_pe+price anchor <= window target, now]`; provably identical to the
-     full interpolation (full-read fallback when no priced anchor predates target).
-     ~29x faster for 1M, ~5x for 1Y/YTD. `_window_target` shared by `_delta_rows`/`_delta_point`.
-- Tests: +`test_unknown_key_rejected`, +`test_build_app_rejects_weak_secret_with_auth`,
-  +`test_bounded_read_matches_full_history` (6 tickers × 4 windows). 30 pass.
-- Also trimmed README 103→65 lines.
 
 _(Older entries moved to `MEMORY_ARCHIVE.md`.)_

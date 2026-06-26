@@ -2,6 +2,82 @@
 
 Older activity-log entries pruned from `MEMORY.md` (newest first).
 
+### 2026-06-23 — Forward-P/E money-losing handling (Design Y, branch `fix/pe-chart-gaps-and-ibes-neg`)
+- Problem: a company forecast to lose money has negative forward EPS ⇒ forward P/E is
+  undefined. Three write-sites stored a *negative* P/E (live `fetcher` via Yahoo
+  `forwardPE`; `import_wayback_fwdpe`; `import_ibes` PRICE/MEANEST) that plotted below
+  zero, and `_interpolate_series` *bridged* the loss gaps, faking a smooth trend.
+- Design Y — store signed, break at serve: forward-P/E columns keep the raw *signed* ratio
+  (negative = forecast loss); no source guards, no schema change. `_interpolate_series`
+  reworked in EPS-space — nulls loss anchors and never interpolates a span a loss bounds,
+  so the line breaks from last-profitable to next-profitable anchor (kills the near-zero
+  +∞ interpolation spike: MU max served 115.7 vs a 2887 spike). TTM stays nulled-at-source
+  (it isn't interpolated). `_hide_nonpositive_pe` enforces the rule on the latest grid.
+- Chart `dashboard.html`: a `segment.borderColor` callback breaks a line only at *genuine*
+  gaps (row present, value null) while still bridging *alignment* gaps (ticker lacks a union
+  date) — both are `null` and `spanGaps` bridged both before. NOTE: first impl had a dead
+  loop — Chart.js emits one segment per *adjacent* pair (p1DataIndex = p0DataIndex+1), so
+  scanning indices *between* the endpoints never fired and no line broke (caught visually on
+  UAT, not by tests). Fixed to test the segment's two endpoints against the genuine-gap mask.
+- An earlier "drop negatives at source + null the DB" attempt was reverted in favour of Y.
+  Verified: 33 tests pass (+`test_interpolate_breaks_across_forward_loss`); MU IBES breaks
+  Jul–Sep 2023; 0 negatives served across all 39 tickers; NIO → 98 positive fwd-P/E days.
+- Follow-up refactor (same branch): replaced the categorical *union-date* x-axis with a
+  shared **linear time axis** (x = epoch-ms). The union made per-ticker density distort time
+  — equal calendar spans rendered at unequal width (INTC 1986→ at 30d buckets vs ARM daily ⇒
+  recent years ~15× wider). This deletes `unionDates`/`alignRows`/`col`/`genuineGap`, so
+  `segmentBreak` is gone too — replaced by plain `spanGaps:false` (one ticker per chart ⇒
+  every null is a genuine gap). `cutoffLine` maps date→pixel via the scale.
+- Verified the axis math via **headless Chart.js** (node + stubbed canvas): line/bar data map
+  to exact axis pixels. Caught+fixed there: bar charts default `offset:true`, insetting the
+  volume bars to ~83% of the width while the lines use the full axis (looked like vol not
+  matching the lines / data "squished") — forced `offset:false` on both x-axes.
+- Stood up local **Playwright** E2E (headless Chromium + app on :9090). It caught what the
+  headless axis-math missed: the volume x-axis reserves a right gutter for its last date
+  label that the label-less P/E axis didn't → ~29px misalignment (pe_plot 1023 vs vol 994).
+  Fixed with `pinX` (afterFit `paddingRight=36`) on both → both `[58,992]`. Also added even
+  round-date ticks (`niceDateTicks` + `fmtDateTick`) and cleared the review findings (2 stale
+  comments, single-point-extent guard). All Playwright-verified (geometry, ticks, no errors).
+- **Loss shading** (`lossBandsPlugin`): a semi-transparent band tinted to each line over the
+  periods its P/E is undefined (a missing line otherwise reads as a glitch). TTM: client-side,
+  null P/E within trailing-EPS coverage (reaches edges; day-gaps in trailing-EPS don't
+  fragment it). Forward/IBES: a server loss flag `<col>_loss` from `_interpolate_series` — the
+  client can't tell a forecast-loss null from a no-data null at the *visible edge* (e.g. MU's
+  IBES loss starts before its first in-window positive anchor). Sub-3-week gaps dropped as
+  interp noise. Playwright-verified: INTC blue-only, MU blue+green, NIO blue+red+green.
+- Review findings fixed: delta `now` → N/A when the latest forward P/E is a loss (was a stale
+  pre-loss value); `_history_rows` reaches forward to the right anchor (new
+  `storage.earliest_value_date`) so a custom window inside a sparse gap interpolates instead
+  of rendering blank (verified on MU 2021-08: 0 → 5 values); a stored 0 P/E is nulled (was
+  plotting y:0). +3 tests (36 total). Deferred to a follow-up PR: gap-aware downsampling,
+  explicit-series-state refactor, Playwright/JS E2E.
+
+### 2026-06-23 — Review `feat/pe-chart-enhancements`
+- Compared the fetched feature ref against `origin/main` (3 commits; 4 files).
+- Found overlapping history requests can populate/render the cache with an obsolete
+  range after the user has selected a newer range.
+- Found history is clipped to a custom start before interpolation, so a window starting
+  inside a sparse forward-P/E gap loses values until the next in-window anchor.
+- Refactoring opportunities: share the duplicated column chooser and replace the
+  categorical union-date axis with a true time axis.
+
+### 2026-06-22 — Review fixes on `feat/delta-fwd-pe` (sort, config hardening, delta perf)
+- Reviewed the whole project; fixed four items, each its own commit:
+  1. Delta page sorted wrong — the `delta_pct` column's `sort: "desc"` overrode the JS
+     magnitude sort. Dropped it so default order is |Δ%|-desc (header still sortable).
+  2. `HostConfig` now `extra="forbid"` — a typo'd `auth_token` no longer silently
+     disables auth.
+  3. `build_app` calls `check_secret` (renamed from `_check_secret`) so a weak secret +
+     auth is rejected regardless of construction path, not just via `load_config`.
+  4. `api_delta` read the full per-ticker history (back to 1986, ~10k rows × 39) every
+     request. New `storage.latest_value_date` + `views._delta_rows` bound the read to
+     `[latest forward_pe+price anchor <= window target, now]`; provably identical to the
+     full interpolation (full-read fallback when no priced anchor predates target).
+     ~29x faster for 1M, ~5x for 1Y/YTD. `_window_target` shared by `_delta_rows`/`_delta_point`.
+- Tests: +`test_unknown_key_rejected`, +`test_build_app_rejects_weak_secret_with_auth`,
+  +`test_bounded_read_matches_full_history` (6 tickers × 4 windows). 30 pass.
+- Also trimmed README 103→65 lines.
+
 ### 2026-06-22 — Add Δ-forward-P/E page to pe_monitor (branch `feat/delta-fwd-pe`)
 - New page `/pe-monitor/delta` + `delta.html`: per-ticker forward-P/E change over a
   selectable window (1D/1W/1M/3M/6M/YTD/1Y), ag-grid leaderboard sorted by |Δ%|, nav
