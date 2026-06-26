@@ -2,6 +2,69 @@
 
 Older activity-log entries pruned from `MEMORY.md` (newest first).
 
+### 2026-06-24 — Bloomberg-terminal theme + rename to "Gambler's Terminal" (branch `feat/bloomberg-terminal-theme`)
+- Overhauled look/feel to mimic a Bloomberg Terminal. New shared `core/static/terminal.css`
+  (served at `/static/terminal.css`, linked by every page): black canvas, amber chrome, green/red
+  data, cyan functions/links, sharp corners, dense monospace. Palette centralized in CSS vars,
+  reusing legacy `--bg/--surface/--ink/--muted/--border/--accent` names so the variable-driven
+  `dashboard.html` recolored almost for free (data pages drop their inline `:root` colours).
+- Pages: landing → "function menu" (amber header + live clock, amber function bar, numbered rows,
+  cyan mnemonics, fixed bottom status bar); calculator + ai_ratios + delta + dashboard all themed.
+- ag-grid `themeQuartz.withParams` → dark (amber headers, black rows) on both pe_monitor grids.
+  Chart.js: TTM→amber, forward→red, IBES→green on black; dim grid/ticks via `Chart.defaults`;
+  loss-band tints + cutoff line retinted; volume bars muted. Bloomberg *GP*-style conventions
+  added: price axis moved to the **right** on both stacked charts (pe/vol stay pixel-aligned via
+  `pinX` now padding *both* ends — moving y off the left un-pinned it), plus a `lastValueTagPlugin`
+  drawing a colored latest-value chip per line over the right axis (vertically dodged when close).
+  Crosshair declined by user. e2e alignment test still green.
+- Follow-up UI tweaks (same branch): the struck legend series and the selected time range now
+  persist via localStorage (`pe-hidden-series`, `pe-range`) — a hidden line survives a range/
+  ticker rebuild instead of resurrecting (it was rebuilt fresh each `renderChart`), and the page
+  reopens on the last-selected range, not "All". Playwright-verified.
+- Then: replaced the repeated per-chart legends with ONE shared HTML legend (`#series-legend`,
+  three TTM/Forward/IBES chips that drive `hiddenSeries` across every chart; per-chart Chart.js
+  legends set `display:false`). Added column filters to the **delta** page (ag-grid floating-filter
+  row — text on ids, `agNumberColumnFilter` on values, e.g. Fwd P/E < 20). Playwright-verified
+  (3 chips, toggle hides line+tag on all charts; delta `now<20` → 20/39 rows). e2e still green.
+- Font: bundled **IBM Plex Mono** locally (OFL, `core/static/fonts/*.woff2`, no CDN) as `--mono`
+  + ag-grid `fontFamily` + `Chart.defaults.font.family`. Closest free face to the Terminal's
+  institutional monospace (VT323/Share Tech Mono compared, rejected). Emoji fallbacks appended;
+  sandbox has no emoji font so module icons (📈🗻🤖) tofu in screenshots only, fine in-browser.
+- Rename **Gambler's Toolbox → Gambler's Terminal** across display strings only (FastAPI title,
+  landing, README, manifest name/short_name + black theme colour, config-sample comments). Kept
+  internal ids (slug `gamblers-toolbox`, env var `GAMBLERS_TOOLBOX_CONFIG`, log prefix) unchanged.
+- Verified: 76 tests pass (incl. chart e2e geometry — recolor moved no pixels); Playwright drove
+  all pages, `document.fonts.check` confirms IBM Plex Mono loaded, zero console errors. Local
+  commit; not pushed, no PR.
+
+### 2026-06-24 — Add Pyramiding Calculator module (branch `feat/avg-down-calculator`)
+- New self-contained module `modules/averaging_calc/` (display name "Pyramiding Calculator",
+  slug `averaging-calc`, icon 🗻 Mount Fuji — Unicode has no pyramid glyph): given a position
+  (qty, avgCost, mktPx) and a target P/L%, returns the shares to add at market to move the %
+  from its current level to the target. Landing card at order=20. Primary use: pressing a
+  *winning* position — raise cost basis to dial a gaudy gain back (e.g. +20→+15); also averages
+  down a loss. No data/scheduler/lifespan. README module table updated.
+- Math (`calc.py`): `x = qty·(px − avgCost·(1+t)) / (px·t)`, i.e. new% = Q(P−C)/(QC+xP) =
+  constant dollar P/L over a growing cost basis. P/L% only shrinks toward 0; reachable band is
+  strictly between 0 and current%. Dollar P/L is unchanged by the buy.
+- **Single source of truth (Approach A):** all math lives in `calc.py::evaluate()`; the page
+  `calculator.html` just `fetch()`es `GET /api/calc` (debounced, race-guarded) and renders — no
+  formula in the browser, so nothing can drift. `target_pct` is optional (current-only readout);
+  an unreachable target is `200 {reachable:false, plan:null}`, not an error; whole-share figures
+  are computed server-side too.
+- **Hardening from an independent review (all verified):** (1) non-finite inputs `inf`/`nan`/
+  `1e309` were returning HTTP **500** (Starlette `JSONResponse` uses `allow_nan=False`) — now
+  `math.isfinite` validates all four inputs → **400**; (2) a `_require_finite_result` guard on
+  *every* derived value — the top-level readout (`current_pnl_pct`/`pnl_amount`, which leaked
+  `inf` for extreme finite inputs like `avg_cost=1e-308`) **and** the plan (incl. before
+  `math.ceil`, which `OverflowError`s on `inf`) — so all overflow 400s, never 500; (3)
+  `target==current` float knife-edge could emit a ~1e-12 *negative*
+  share count — guarded by requiring `shares_to_buy > 0` before marking reachable.
+- Verified: re-derived formula independently; 200k+50k random round-trips reproduce the target%
+  to ~1e-13; monotonicity 0 violations; **Playwright** browser drive renders correctly with no
+  console errors. `tests/test_averaging_calc.py` (18) + `test_discovery_order_and_unique_slugs`
+  fix. **76 tests pass.** Pushed; PR not yet opened.
+
 ### 2026-06-23 — Forward-P/E money-losing handling (Design Y, branch `fix/pe-chart-gaps-and-ibes-neg`)
 - Problem: a company forecast to lose money has negative forward EPS ⇒ forward P/E is
   undefined. Three write-sites stored a *negative* P/E (live `fetcher` via Yahoo

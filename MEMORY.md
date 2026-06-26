@@ -2,20 +2,18 @@
 
 ## Active Status
 
-**Latest:** Added a **4th module** `modules/crypto_tracker/` (display "Crypto Tracker", slug
-`crypto-tracker`, icon 🪙, `order=120` → sorts last on the landing menu) on branch
-`feat/crypto-tracker`, cut from `feat/bloomberg-terminal-theme` so it inherits `terminal.css` and the
-themed siblings. Ports a standalone Binance-TWR CLI into the module architecture: computes **TWR /
-MWR (XIRR) / CAGR** over All-time/5Y/3Y/YTD/1Y/90D/30D for a multi-asset (BTC/ETH) portfolio whose
-transactions live in a CSV of `(date, asset, delta, note)` rows, USD-proxied by Binance USDT-pair
-closes. Same cache+scheduler shape as `ai_ratios`: in-memory `cache.py` (single-flight refresh, keeps
-last-known-good + `last_error` on failure), 15-min `BackgroundScheduler` + one-off initial pull,
-served by `views.py` (dashboard + `/api/data` + `POST /api/refresh`). Terminal-themed dashboard:
-holdings table beside a sign-colored returns table (n/a under ~1y). Historical klines cached on disk
-(`.price_cache.json`, gitignored — immutable). **`portfolio.csv` is gitignored** (real holdings stay
-local, like `config.toml`); committed `portfolio.sample.csv` documents the schema. No host-config or
-new dependency (`requests` already pinned). Prior `feat/bloomberg-terminal-theme` (price panel +
-per-panel toggles, review-clean) is the unmerged base of this branch.
+**Latest:** Addressed the `feat/crypto-tracker` review (fix commit on top of the two module commits).
+Both P1s + a robustness item fixed in `twr.py`: (1) the MWR/XIRR solver now bisects in **log-rate
+space** (`x = ln(1+r)`) with an overflow-safe cap, so short windows with large gains resolve — a
+30-day double now reports +100% MWR instead of `n/a` (old `high=1000` bracket topped out at a 76.4%
+30-day gain); (2) `load_portfolio()` now **rejects** malformed non-blank rows with CSV line numbers
+(real-date `strptime`, known asset, finite delta) instead of silently skipping or letting NaN/Inf reach
+JSON; (3) the price cache writes **atomically** (temp + `os.replace`) and treats a corrupt read as
+empty, so a truncated cache no longer bricks refreshes. Also made `compute()` take an injectable price
+provider + clock (`BinancePrices` / `compute(prices, today)`) for a deterministic end-to-end test. 103
+tests pass (+10). The P/E split-cliff finding the review re-raised is the **already-deferred**
+event-triggered item below — different module, not in scope for this branch. 4th module otherwise as
+built.
 
 **Deferred (event-triggered, not scheduled):** a stock split will put a fake cliff in the
 price panel because daily snapshots store raw `currentPrice` (`fetcher.py:46`) and are never
@@ -28,11 +26,10 @@ in `storage.py` today; no `yt.splits` read anywhere.
 still-unmerged `feat/bloomberg-terminal-theme` (for `terminal.css`), merge order is bloomberg first,
 then crypto-tracker — or rebase crypto-tracker onto `main` once bloomberg lands.
 
-**Immediate next steps:** Commit/push `feat/crypto-tracker` and open its PR. **Binance egress is
-unverified in this sandbox** — the live `compute()`/scheduler path (and thus the dashboard with real
-data) has NOT been exercised here; only the network-free math + API/template tests have. Verify a live
-refresh in an environment that can reach `api.binance.com` before relying on it. The pre-existing
-`tests/test_app.py::test_landing_and_modules_open` hang is intermittent (passed in this run).
+**Immediate next steps:** Push the fix commit and open the PR (base `feat/bloomberg-terminal-theme`,
+or rebase onto `main` once that lands). **Binance egress is unverified in this sandbox** — the live
+`compute()`/scheduler path is still unexercised; verify a real refresh against `api.binance.com` before
+relying on the dashboard. Pre-existing TestClient hang remains intermittent (full suite passed here).
 
 - `core/` — host shell: `module.py` (interface), `registry.py` (discovery), `auth.py`
   (token→cookie gate), typed `config.py` (Pydantic `HostConfig`), `main.py`
@@ -68,6 +65,41 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   npm registry reachable here; external UAT host is NOT (sandbox egress).
 
 ## Activity Log
+
+### 2026-06-27 — Crypto-tracker review fixes (branch `feat/crypto-tracker`)
+- **P1 — IRR bracket:** `xirr` bisected in `[-0.9999, 1000]`, whose upper bound represents only a
+  76.4% 30-day gain, so a 30-day double (annual IRR ≈ 4,597) found no sign change → MWR `n/a`. Rewrote
+  it to bisect in **log-rate space** (`x = ln(1+r)`) with a dynamic cap (`min(80, 690/t_max)`) that
+  keeps `exp(x)` and `(1+r)**t` below float overflow, expanding the upper bound until bracketed. A
+  30-day double now yields +100% MWR. Regression tests added.
+- **P1 — CSV validation:** `load_portfolio()` skipped malformed date/asset rows silently and accepted
+  NaN/Inf deltas (which propagate to `total_value` and 500 on Starlette's `allow_nan=False` JSON). Now
+  it validates each non-blank row (real `strptime` date — `DATE_RE` only checks shape; known asset;
+  finite delta) and **raises with `line N` numbers**, surfaced via the cache's `last_error`. Blank
+  rows still skipped.
+- **Robustness — price cache:** `save_cache` writes a temp file + `os.replace` (atomic); `load_cache`
+  treats a truncated/corrupt JSON as empty instead of raising on every future refresh.
+- **Refactor — injectable `compute()`:** added a `BinancePrices` provider (`.price(symbol, date)`) and
+  `compute(prices=None, today=None)`; valuation helpers take the provider instead of
+  `(today_str, today_prices, cache)`. Enables a deterministic end-to-end `compute()` test (no network/disk).
+- **Deferred / not in scope:** the P/E price-panel split-cliff (re-raised in review) stays the
+  event-triggered item in Active Status (different module, pre-existing). Per-date valuation series +
+  timestamp-format dedup left as follow-ups (negligible at current scale).
+- 103 tests pass (+10 in `test_crypto_tracker.py`). `git diff --check` clean; module compiles.
+
+### 2026-06-26 — Review `feat/crypto-tracker` against `main`
+- Fetched and reviewed the full 9-commit branch, including the inherited terminal-theme/P/E chart
+  changes. Reproduced a concrete MWR failure: a 30-day doubled position returns `None`, because the
+  annualized XIRR bracket ends at 1,000× (only a 76.4% 30-day cumulative gain fits below that cap).
+- Found that CSV parsing silently drops malformed date/asset rows and accepts non-finite deltas, so a
+  typo can publish a materially incorrect portfolio or later make the JSON API fail. Also noted the
+  price panel inherits stored raw live prices while backfill is adjusted, producing a false split cliff
+  after a split unless persisted history is back-adjusted.
+- Refactor candidates: build one per-date valuation series instead of repeatedly scanning rows for
+  every range/boundary; inject a price provider/clock for deterministic compute tests; use atomic,
+  validated disk-cache writes; extract the duplicated terminal timestamp formatting.
+- Verified `git diff --check`, bytecode compilation, and 11 network-free crypto math tests. Did not
+  change production code.
 
 ### 2026-06-26 — Add Crypto Tracker module (branch `feat/crypto-tracker`)
 - New self-contained module `modules/crypto_tracker/` (4th; "Crypto Tracker", slug `crypto-tracker`,
@@ -132,68 +164,5 @@ ai_ratios JSON-snapshot persistence; an exempt `/healthz` endpoint.
   `tests/test_app.py::test_landing_and_modules_open`, before any branch-specific assertion. The
   same isolated test also times out on an exported `origin/main` tree, confirming it is not a
   regression from this branch.
-
-### 2026-06-24 — Bloomberg-terminal theme + rename to "Gambler's Terminal" (branch `feat/bloomberg-terminal-theme`)
-- Overhauled look/feel to mimic a Bloomberg Terminal. New shared `core/static/terminal.css`
-  (served at `/static/terminal.css`, linked by every page): black canvas, amber chrome, green/red
-  data, cyan functions/links, sharp corners, dense monospace. Palette centralized in CSS vars,
-  reusing legacy `--bg/--surface/--ink/--muted/--border/--accent` names so the variable-driven
-  `dashboard.html` recolored almost for free (data pages drop their inline `:root` colours).
-- Pages: landing → "function menu" (amber header + live clock, amber function bar, numbered rows,
-  cyan mnemonics, fixed bottom status bar); calculator + ai_ratios + delta + dashboard all themed.
-- ag-grid `themeQuartz.withParams` → dark (amber headers, black rows) on both pe_monitor grids.
-  Chart.js: TTM→amber, forward→red, IBES→green on black; dim grid/ticks via `Chart.defaults`;
-  loss-band tints + cutoff line retinted; volume bars muted. Bloomberg *GP*-style conventions
-  added: price axis moved to the **right** on both stacked charts (pe/vol stay pixel-aligned via
-  `pinX` now padding *both* ends — moving y off the left un-pinned it), plus a `lastValueTagPlugin`
-  drawing a colored latest-value chip per line over the right axis (vertically dodged when close).
-  Crosshair declined by user. e2e alignment test still green.
-- Follow-up UI tweaks (same branch): the struck legend series and the selected time range now
-  persist via localStorage (`pe-hidden-series`, `pe-range`) — a hidden line survives a range/
-  ticker rebuild instead of resurrecting (it was rebuilt fresh each `renderChart`), and the page
-  reopens on the last-selected range, not "All". Playwright-verified.
-- Then: replaced the repeated per-chart legends with ONE shared HTML legend (`#series-legend`,
-  three TTM/Forward/IBES chips that drive `hiddenSeries` across every chart; per-chart Chart.js
-  legends set `display:false`). Added column filters to the **delta** page (ag-grid floating-filter
-  row — text on ids, `agNumberColumnFilter` on values, e.g. Fwd P/E < 20). Playwright-verified
-  (3 chips, toggle hides line+tag on all charts; delta `now<20` → 20/39 rows). e2e still green.
-- Font: bundled **IBM Plex Mono** locally (OFL, `core/static/fonts/*.woff2`, no CDN) as `--mono`
-  + ag-grid `fontFamily` + `Chart.defaults.font.family`. Closest free face to the Terminal's
-  institutional monospace (VT323/Share Tech Mono compared, rejected). Emoji fallbacks appended;
-  sandbox has no emoji font so module icons (📈🗻🤖) tofu in screenshots only, fine in-browser.
-- Rename **Gambler's Toolbox → Gambler's Terminal** across display strings only (FastAPI title,
-  landing, README, manifest name/short_name + black theme colour, config-sample comments). Kept
-  internal ids (slug `gamblers-toolbox`, env var `GAMBLERS_TOOLBOX_CONFIG`, log prefix) unchanged.
-- Verified: 76 tests pass (incl. chart e2e geometry — recolor moved no pixels); Playwright drove
-  all pages, `document.fonts.check` confirms IBM Plex Mono loaded, zero console errors. Local
-  commit; not pushed, no PR.
-
-### 2026-06-24 — Add Pyramiding Calculator module (branch `feat/avg-down-calculator`)
-- New self-contained module `modules/averaging_calc/` (display name "Pyramiding Calculator",
-  slug `averaging-calc`, icon 🗻 Mount Fuji — Unicode has no pyramid glyph): given a position
-  (qty, avgCost, mktPx) and a target P/L%, returns the shares to add at market to move the %
-  from its current level to the target. Landing card at order=20. Primary use: pressing a
-  *winning* position — raise cost basis to dial a gaudy gain back (e.g. +20→+15); also averages
-  down a loss. No data/scheduler/lifespan. README module table updated.
-- Math (`calc.py`): `x = qty·(px − avgCost·(1+t)) / (px·t)`, i.e. new% = Q(P−C)/(QC+xP) =
-  constant dollar P/L over a growing cost basis. P/L% only shrinks toward 0; reachable band is
-  strictly between 0 and current%. Dollar P/L is unchanged by the buy.
-- **Single source of truth (Approach A):** all math lives in `calc.py::evaluate()`; the page
-  `calculator.html` just `fetch()`es `GET /api/calc` (debounced, race-guarded) and renders — no
-  formula in the browser, so nothing can drift. `target_pct` is optional (current-only readout);
-  an unreachable target is `200 {reachable:false, plan:null}`, not an error; whole-share figures
-  are computed server-side too.
-- **Hardening from an independent review (all verified):** (1) non-finite inputs `inf`/`nan`/
-  `1e309` were returning HTTP **500** (Starlette `JSONResponse` uses `allow_nan=False`) — now
-  `math.isfinite` validates all four inputs → **400**; (2) a `_require_finite_result` guard on
-  *every* derived value — the top-level readout (`current_pnl_pct`/`pnl_amount`, which leaked
-  `inf` for extreme finite inputs like `avg_cost=1e-308`) **and** the plan (incl. before
-  `math.ceil`, which `OverflowError`s on `inf`) — so all overflow 400s, never 500; (3)
-  `target==current` float knife-edge could emit a ~1e-12 *negative*
-  share count — guarded by requiring `shares_to_buy > 0` before marking reachable.
-- Verified: re-derived formula independently; 200k+50k random round-trips reproduce the target%
-  to ~1e-13; monotonicity 0 violations; **Playwright** browser drive renders correctly with no
-  console errors. `tests/test_averaging_calc.py` (18) + `test_discovery_order_and_unique_slugs`
-  fix. **76 tests pass.** Pushed; PR not yet opened.
 
 _(Older entries moved to `MEMORY_ARCHIVE.md`.)_
