@@ -107,29 +107,63 @@ def test_chart_aligns_and_shades_losses(live_server):
         # than a fixed sleep, so a slow CI fetch/render can't make this read too early.
         page.wait_for_function(
             "() => typeof chartInstances !== 'undefined' && chartInstances.size === 2"
-            " && [...chartInstances.values()].every(i => i.pe && i.vol"
+            " && [...chartInstances.values()].every(i => i.price && i.pe && i.vol"
+            "      && i.price.scales.x.right > i.price.scales.x.left"
             "      && i.pe.scales.x.right > i.pe.scales.x.left"
             "      && i.vol.scales.x.right > i.vol.scales.x.left)",
             timeout=15000)
         diag = page.evaluate("""() => {
           const o = {};
           for (const [t, inst] of chartInstances) {
-            const x = inst.pe.scales.x, vx = inst.vol.scales.x;
-            o[t] = {pe: [Math.round(x.left), Math.round(x.right)],
+            const x = inst.pe.scales.x, vx = inst.vol.scales.x, px = inst.price.scales.x;
+            o[t] = {price: [Math.round(px.left), Math.round(px.right)],
+                    pe: [Math.round(x.left), Math.round(x.right)],
                     vol: [Math.round(vx.left), Math.round(vx.right)],
                     bands: inst.pe.options.plugins.lossBands.bands.length};
           }
           return o;
+        }""")
+        # Panel toggle regression: clicking "Volume" hides the volume panels, strikes the
+        # chip, AND re-homes the date axis to the now-bottom-most visible panel (P/E). The
+        # last part guards the regression where hiding Volume — the only panel showing date
+        # labels — left every visible chart with no time axis at all.
+        toggle = page.evaluate("""() => {
+          const inst = () => [...chartInstances.values()][0];
+          const dateAxis = () => ({
+            price: !!inst().price.options.scales.x.ticks.display,
+            pe:    !!inst().pe.options.scales.x.ticks.display,
+            vol:   !!inst().vol.options.scales.x.ticks.display});
+          const wrap = document.querySelector('.vol-wrap');
+          const volChip = () => [...document.querySelectorAll('#panel-toggle .series-chip')]
+                                   .find(c => c.textContent === 'Volume');
+          const chip = volChip();
+          const a11y = {role: chip.getAttribute('role'), pressed: chip.getAttribute('aria-pressed'),
+                        tabindex: chip.getAttribute('tabindex')};
+          const before = {wrap: getComputedStyle(wrap).display, axis: dateAxis()};
+          volChip().click();   // togglePanel rebuilds chips + charts, so re-query afterwards
+          return {a11y, before,
+                  after: {wrap: getComputedStyle(wrap).display, axis: dateAxis(),
+                          off: volChip().classList.contains('off')}};
         }""")
     finally:
         browser.close()
         pw.stop()
 
     assert set(diag) == {"AAA", "BBB"}, diag
-    # volume bars must share the line chart's plot area (the alignment bug)
+    # price, P/E and volume panels must share one plot area (the alignment bug)
     for t in ("AAA", "BBB"):
         assert diag[t]["pe"] == diag[t]["vol"], f"{t}: volume x-axis misaligned with lines"
+        assert diag[t]["price"] == diag[t]["pe"], f"{t}: price x-axis misaligned with lines"
     # loss shading: present for the loss-maker, absent for the clean name
     assert diag["AAA"]["bands"] >= 1, "loss-making ticker should be shaded"
     assert diag["BBB"]["bands"] == 0, "always-profitable ticker should have no shading"
+    # panel toggle hides the volume panels and marks the chip off
+    assert toggle["before"]["wrap"] != "none" and toggle["after"]["wrap"] == "none", toggle
+    assert toggle["after"]["off"], "Volume chip should be struck-through after clicking"
+    # date axis: volume owns it while visible; hiding volume re-homes labels to P/E
+    assert toggle["before"]["axis"] == {"price": False, "pe": False, "vol": True}, toggle
+    assert toggle["after"]["axis"]["pe"] is True, "hiding Volume must move date labels to P/E"
+    assert toggle["after"]["axis"]["vol"] is False, toggle
+    # toggle chips are keyboard-accessible buttons (aria-pressed reflects shown state)
+    assert toggle["a11y"] == {"role": "button", "pressed": "true", "tabindex": "0"}, toggle["a11y"]
     assert not page_errors, f"chart raised JS errors: {page_errors}"
